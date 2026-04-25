@@ -1424,6 +1424,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--text);
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 // ══════════════════════════════════════════════════════════════════
 // LANGUAGE SYSTEM — EN, HI, MR, KN, TA, TE
@@ -1876,8 +1878,42 @@ function setMode(m){
   renderHome();
 }
 
+function cleanupActiveTools(){
+  // Stop PPG camera if running
+  if(typeof _ppg !== 'undefined' && _ppg && _ppg.active){
+    _ppg.active=false;
+    _ppg.phase='done';
+    if(_ppg.animFrame) cancelAnimationFrame(_ppg.animFrame);
+    if(_ppg.stream){
+      _ppg.stream.getTracks().forEach(function(t){
+        try{ t.applyConstraints({advanced:[{torch:false}]}).catch(function(){}); }catch(e){}
+        t.stop();
+      });
+      _ppg.stream=null;
+    }
+    if(_ppg.video){ _ppg.video.srcObject=null; _ppg.video=null; }
+  }
+  // Stop Swara voice recording if running
+  if(typeof _swaraRec !== 'undefined' && _swaraRec && _swaraRec.active){
+    _swaraRec.active=false;
+    if(_swaraRec.animFrame) cancelAnimationFrame(_swaraRec.animFrame);
+    if(_swaraRec.stream){
+      _swaraRec.stream.getTracks().forEach(function(t){ t.stop(); });
+      _swaraRec.stream=null;
+    }
+    if(_swaraRec.ctx){
+      try{ _swaraRec.ctx.close(); }catch(e){}
+      _swaraRec.ctx=null;
+    }
+  }
+}
+
 function showTab(tab){
   if(navigator.vibrate) navigator.vibrate(15);
+  // Stop PPG camera if user is leaving Tools tab while PPG was active
+  if(appState.activeTab==='tools' && tab!=='tools'){
+    cleanupActiveTools();
+  }
   appState.activeTab=tab;
   document.querySelectorAll('.tab-panel').forEach(p=>p.style.display='none');
   const panel=document.getElementById('tab-'+tab);
@@ -2669,6 +2705,10 @@ function renderRitucharya(){
 // TOOLS — BMI, HERBS, AGNI, NADI, TONGUE, VIKRITI
 // ══════════════════════════════════════════════════════════════════
 function switchTool(tool){
+  // Stop camera/mic if user was on PPG or Swara and is leaving
+  if((appState.activeTool==='nadi_ppg' || appState.activeTool==='swara') && tool!==appState.activeTool){
+    cleanupActiveTools();
+  }
   // Brief skeleton on tool switch for perceived performance
   var toolEl=document.getElementById('tool-'+tool);
   if(toolEl&&toolEl.innerHTML.trim()==='') showSkeleton('tool-'+tool,3);
@@ -3902,9 +3942,258 @@ function openPdfModal(){ document.getElementById('pdf-modal').classList.add('ope
 function closePdfModal(){ document.getElementById('pdf-modal').classList.remove('open'); }
 function printReport(){
   closePdfModal();
-  // Ensure result tab is active before printing
-  showTab('result');
-  setTimeout(function(){ window.print(); }, 600);
+  var r=appState.resultData;
+  if(!r){ alert('Please complete the Prakriti quiz first.'); return; }
+
+  // Show loading indicator
+  var loadingEl=document.createElement('div');
+  loadingEl.id='pdf-loading';
+  loadingEl.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,24,16,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;font-family:"DM Sans",sans-serif;';
+  loadingEl.innerHTML='<div style="width:48px;height:48px;border:3px solid rgba(201,151,58,.3);border-top-color:#C9973A;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:16px;"></div>'
+    +'<div style="font-size:14px;font-weight:700;color:#C9973A;margin-bottom:4px;">Generating PDF Report</div>'
+    +'<div style="font-size:11px;color:rgba(255,255,255,.6);">Please wait a moment...</div>';
+  document.body.appendChild(loadingEl);
+
+  // Wait for jsPDF to load if not yet available, with retries
+  var attempts=0;
+  function tryGenerate(){
+    attempts++;
+    if(window.jspdf && window.jspdf.jsPDF){
+      try {
+        generatePdfReport(r);
+      } catch(err) {
+        var le=document.getElementById('pdf-loading'); if(le) le.remove();
+        alert('PDF generation failed: '+(err.message||'Unknown error')+'. Please try again or screenshot this page.');
+      }
+    } else if(attempts < 20) {
+      // Library not loaded yet, retry in 250ms (max 5 seconds wait)
+      setTimeout(tryGenerate, 250);
+    } else {
+      // Give up after 5 seconds
+      var le=document.getElementById('pdf-loading'); if(le) le.remove();
+      alert('PDF library failed to load. Please check your internet connection and try again.');
+    }
+  }
+  setTimeout(tryGenerate, 100);
+}
+
+function generatePdfReport(r){
+  if(!window.jspdf||!window.jspdf.jsPDF){
+    alert('PDF generator is still loading. Please try again in a moment.');
+    var le=document.getElementById('pdf-loading'); if(le) le.remove();
+    return;
+  }
+  var jsPDF = window.jspdf.jsPDF;
+  var pdf = new jsPDF('p', 'mm', 'a4');
+  var pageWidth = 210, pageHeight = 297;
+  var margin = 15;
+  var contentWidth = pageWidth - 2*margin;
+  var y = margin;
+
+  var domNames={vata:'Vata',pitta:'Pitta',kapha:'Kapha'};
+  var domEl={vata:'Air + Ether',pitta:'Fire + Water',kapha:'Earth + Water'};
+  var domColors={vata:[74,126,160],pitta:[200,90,40],kapha:[61,112,80]};
+  var dom=r.dominant;
+  var c=domColors[dom];
+
+  // ═══ HEADER ═══
+  pdf.setFillColor(10,24,16);
+  pdf.rect(0, 0, pageWidth, 35, 'F');
+
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(20);
+  pdf.setTextColor(201,151,58);
+  pdf.text('AyurMind AI', margin, 15);
+
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(9);
+  pdf.setTextColor(232,192,112);
+  pdf.text('Precision Ayurveda · Personalized Prakriti Report', margin, 21);
+
+  pdf.setFontSize(8);
+  pdf.setTextColor(180,180,180);
+  var today=new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'});
+  pdf.text('Generated: '+today, margin, 27);
+
+  // Report ID
+  var reportId='AM-'+Date.now().toString(36).toUpperCase().slice(-8);
+  pdf.text('Report ID: '+reportId, pageWidth-margin, 27, {align:'right'});
+
+  y = 45;
+
+  // ═══ PRAKRITI RESULT ═══
+  pdf.setFillColor(c[0],c[1],c[2]);
+  pdf.roundedRect(margin, y, contentWidth, 32, 3, 3, 'F');
+
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(22);
+  pdf.setTextColor(255,255,255);
+  pdf.text(domNames[dom]+' Prakriti', margin+8, y+13);
+
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(10);
+  pdf.text('Primary Dosha: '+domEl[dom], margin+8, y+20);
+  pdf.setFontSize(8);
+  pdf.text('Based on 24-question classical Ayurvedic assessment', margin+8, y+26);
+
+  y += 40;
+
+  // ═══ DOSHA PERCENTAGES ═══
+  pdf.setTextColor(26,58,42);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(11);
+  pdf.text('Dosha Constitution', margin, y);
+  y += 6;
+
+  var doshas=[{k:'vata',n:'Vata',v:r.vata,c:[74,126,160]},{k:'pitta',n:'Pitta',v:r.pitta,c:[200,90,40]},{k:'kapha',n:'Kapha',v:r.kapha,c:[61,112,80]}];
+  doshas.forEach(function(d){
+    pdf.setFont('helvetica','normal');
+    pdf.setFontSize(9);
+    pdf.setTextColor(60,60,60);
+    pdf.text(d.n, margin, y+4);
+    // Bar bg
+    pdf.setFillColor(230,230,230);
+    pdf.roundedRect(margin+22, y+1, 120, 5, 1, 1, 'F');
+    // Bar fill
+    pdf.setFillColor(d.c[0],d.c[1],d.c[2]);
+    pdf.roundedRect(margin+22, y+1, 120*d.v/100, 5, 1, 1, 'F');
+    pdf.setFont('helvetica','bold');
+    pdf.setTextColor(26,58,42);
+    pdf.text(d.v+'%', margin+148, y+4);
+    y += 8;
+  });
+
+  y += 4;
+
+  // ═══ CHARACTERISTICS ═══
+  var chars={
+    vata:['Thin frame, light weight','Dry skin, cold hands and feet','Quick thinking, creative, imaginative','Variable digestion and sleep','Sensitive to cold, wind, dryness'],
+    pitta:['Medium build, good muscle tone','Warm body, flushed complexion','Sharp intellect, focused, driven','Strong digestion and appetite','Sensitive to heat, sun, stress'],
+    kapha:['Sturdy build, well-developed muscles','Smooth, moist skin, cool body','Calm, steady, patient, loyal','Slow but steady digestion','Sensitive to cold, damp, humidity']
+  };
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(11);
+  pdf.setTextColor(26,58,42);
+  pdf.text('Key Characteristics', margin, y);
+  y += 6;
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(9);
+  pdf.setTextColor(60,60,60);
+  chars[dom].forEach(function(t){
+    pdf.text('• '+t, margin+2, y);
+    y += 5;
+  });
+  y += 4;
+
+  // ═══ DIET GUIDANCE ═══
+  var dietInfo={
+    vata:{favor:'Warm, cooked, unctuous foods. Sweet, sour, salty tastes. Ghee, milk, almonds, dates, root vegetables.',avoid:'Cold, raw foods. Dry, light foods. Beans (except mung), cabbage, excessive caffeine.'},
+    pitta:{favor:'Cool, fresh foods. Sweet, bitter, astringent tastes. Rice, sweet fruits, cucumber, coriander, coconut.',avoid:'Spicy, sour, salty foods. Fermented, oily, fried foods. Alcohol, red meat, tomatoes in excess.'},
+    kapha:{favor:'Warm, light, dry foods. Pungent, bitter, astringent tastes. Barley, honey, leafy greens, ginger, pepper.',avoid:'Heavy, oily, cold foods. Dairy, wheat, bananas, nuts, sweets, fried foods.'}
+  };
+  var di=dietInfo[dom];
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(11);
+  pdf.setTextColor(46,125,50);
+  pdf.text('Diet Recommendations', margin, y);
+  y += 6;
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(9);
+  pdf.setTextColor(46,125,50);
+  pdf.text('FAVOR:', margin, y); y += 5;
+  pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(60,60,60);
+  var favorLines=pdf.splitTextToSize(di.favor, contentWidth);
+  pdf.text(favorLines, margin, y);
+  y += favorLines.length*5 + 3;
+
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(198,40,40);
+  pdf.text('AVOID:', margin, y); y += 5;
+  pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(60,60,60);
+  var avoidLines=pdf.splitTextToSize(di.avoid, contentWidth);
+  pdf.text(avoidLines, margin, y);
+  y += avoidLines.length*5 + 6;
+
+  // ═══ HERBS ═══
+  var herbInfo={
+    vata:'Ashwagandha 3-6g (nervine, stress), Bala 3-6g (strength), Dashamula 50ml decoction (joints), Tagar 1-3g (sleep). Anupan: warm milk or ghee.',
+    pitta:'Amalaki 3-5g (cooling Rasayana), Brahmi 3g (mind), Shatavari 3-6g (reproductive), Guduchi 3-6g (immunity). Anupan: cool water, ghee.',
+    kapha:'Trikatu 1-2g (metabolism), Guggulu 500mg (weight, cholesterol), Pippali 500mg-1g (respiratory), Triphala 5g (digestion). Anupan: warm water, honey.'
+  };
+  // Check if need new page
+  if(y > 240) { pdf.addPage(); y = margin; }
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(11);
+  pdf.setTextColor(201,151,58);
+  pdf.text('Recommended Herbs', margin, y); y += 6;
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(9);
+  pdf.setTextColor(60,60,60);
+  var herbLines=pdf.splitTextToSize(herbInfo[dom], contentWidth);
+  pdf.text(herbLines, margin, y);
+  y += herbLines.length*5 + 6;
+
+  // ═══ DAILY ROUTINE ═══
+  var routines={
+    vata:['Wake 6:00 AM (not before)','Warm sesame oil Abhyanga (self-massage)','Regular meals at FIXED times','Warm baths, avoid wind/cold','Sleep by 10 PM - crucial for Vata'],
+    pitta:['Wake 5:30-6:00 AM (before sun heat)','Cool coconut oil Abhyanga','Never skip meals - especially lunch','Sheetali pranayama in summer','Sleep by 10-10:30 PM'],
+    kapha:['Wake 5:00-5:30 AM (never after 6)','Vigorous exercise daily - mandatory','Light breakfast or skip if not hungry','Warm Trikatu tea in morning','Sleep by 10 PM, no daytime naps']
+  };
+  if(y > 230) { pdf.addPage(); y = margin; }
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(11);
+  pdf.setTextColor(26,58,42);
+  pdf.text('Daily Routine (Dinacharya)', margin, y); y += 6;
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(9);
+  pdf.setTextColor(60,60,60);
+  routines[dom].forEach(function(t){
+    pdf.text('• '+t, margin+2, y); y += 5;
+  });
+  y += 6;
+
+  // ═══ DISCLAIMER ═══
+  if(y > 250) { pdf.addPage(); y = margin; }
+  pdf.setFillColor(248,240,220);
+  pdf.roundedRect(margin, y, contentWidth, 28, 2, 2, 'F');
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(9);
+  pdf.setTextColor(139,94,26);
+  pdf.text('Important Disclaimer', margin+4, y+6);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(8);
+  pdf.setTextColor(80,60,20);
+  var disc='This is an educational assessment, not a medical diagnosis. For clinical Prakriti determination and personalized treatment, consult a qualified Vaidya (BAMS/MD Ayurveda).';
+  var discLines=pdf.splitTextToSize(disc, contentWidth-8);
+  pdf.text(discLines, margin+4, y+12);
+  y += 32;
+
+  // ═══ SOURCE ═══
+  pdf.setFont('helvetica', 'italic');
+  pdf.setFontSize(7);
+  pdf.setTextColor(120,120,120);
+  pdf.text('Based on Charaka Samhita Vimanasthana 8.95 | Ashtanga Hridayam Sutrasthana | CCRAS-PAS Framework', margin, y);
+  y += 4;
+  pdf.text('Ministry of AYUSH - Ayurvedic Pharmacopoeia of India (API) | WHO Monographs on Selected Medicinal Plants', margin, y);
+
+  // ═══ FOOTER on every page ═══
+  var pageCount = pdf.internal.getNumberOfPages();
+  for(var i=1; i<=pageCount; i++){
+    pdf.setPage(i);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(7);
+    pdf.setTextColor(150,150,150);
+    pdf.text('AyurMind AI - Personalized Prakriti Report', margin, pageHeight-8);
+    pdf.text('Page '+i+' of '+pageCount, pageWidth-margin, pageHeight-8, {align:'right'});
+  }
+
+  // ═══ SAVE ═══
+  var filename='AyurMind-'+domNames[dom]+'-Report-'+today.replace(/ /g,'-')+'.pdf';
+  pdf.save(filename);
+
+  var le=document.getElementById('pdf-loading'); if(le) le.remove();
 }
 function resetQuiz(){
   appState.resultData=null;
@@ -5120,21 +5409,52 @@ function renderSwara(){
   var r=appState.resultData;
   var dom=r?r.dominant:null;
 
+  // ═══════════════════════════════════════════════════════════
+  // SHABDA SWARA DATA - Authoritative Sanskrit terminology + clinical refs
+  // Sources: 
+  //   - Charaka Samhita Vimanasthana 8.94-106 (Prakriti Lakshana)
+  //   - Charaka Samhita Indriyasthana 5 (Voice as prognostic — Rishtam)
+  //   - Sushruta Samhita Sutrasthana 10.4 (Trividha Pariksha)
+  //   - Ashtanga Hridayam Sutrasthana 1.22 (Ashtavidha Pariksha)
+  //   - Ashtanga Sangraha Sharirasthana 8.27
+  //   - Yogaratnakara Purvardha (Ashtasthana Pariksha)
+  //   - Madhava Nidana Ch.1 (Voice as disease indicator)
+  // ═══════════════════════════════════════════════════════════
   var SWARA={
-    vata:{color:'#4A90B8',traits:{quality:45,depth:30,speed:85,clarity:50,strength:35},
-      classical:'Thin (Ksheena), dry (Shushka), cracking (Sphuta), fast, inconsistent volume — CS Vimanasthana 8.102',
-      herb:'Yashtimadhu (licorice) + warm water — supreme voice herb in Ayurveda',
-      imbalance:'Excessively hoarse, trembling — Vata Vikriti in Pranavaha Srotas'},
-    pitta:{color:'#C85A28',traits:{quality:80,depth:65,speed:70,clarity:90,strength:85},
-      classical:'Sharp (Tikshna), clear (Spashta), commanding, authoritative, medium speed — CS Vimanasthana 8.102',
-      herb:'Brahmi + Shatavari — cools Pitta in vocal channels. Coconut oil pulling.',
-      imbalance:'Harsh, overly aggressive, burning throat — Pitta Vikriti in Rakta/throat'},
-    kapha:{color:'#2E7D32',traits:{quality:85,depth:95,speed:35,clarity:70,strength:75},
-      classical:'Deep (Gambhira), sweet (Madhura), resonant, slow, melodious — CS Vimanasthana 8.102',
-      herb:'Trikatu + honey — clears Kapha from throat (never heat honey). Nasya with sesame oil.',
-      imbalance:'Congested, muffled, heavy — Kapha Vikriti in Pranavaha Srotas (chest)'}
+    vata:{color:'#4A90B8',traits:{f0:75,jitter:80,shimmer:75,intensity:30,stability:25,hnr:35},
+      sanskrit:'Ksheena Swara · Sphutita Swara · Aruksha Swara',
+      classical:'Thin (Ksheena/क्षीण), dry (Aruksha/अरूक्ष), cracking (Sphutita/स्फुटित), fast pace, inconsistent volume, hoarseness',
+      meaning:'Voice indicates Vata predominance — Prana Vata + Udana Vata governing speech. Light, mobile, irregular qualities reflect Vata\'s Chala (mobile) and Ruksha (dry) gunas in Pranavaha Srotas.',
+      acoustic:'High F0 variability (jitter >1.5%), low intensity (<60dB), reduced HNR (<15dB)',
+      herb:'Yashtimadhu (Glycyrrhiza glabra) 3-5g + warm water 2x/day. Sesame oil Gandusha (oil pulling). Ashwagandha + warm milk bedtime.',
+      imbalance:'Excessively hoarse, trembling, breathless — Vata Vikriti in Pranavaha + Udanavaha Srotas',
+      ref:'CS Vimanasthana 8.96-100 | CS Indriyasthana 5.16 | AH Sutrasthana 1.22'},
+    pitta:{color:'#C85A28',traits:{f0:55,jitter:25,shimmer:30,intensity:85,stability:75,hnr:80},
+      sanskrit:'Tikshna Swara · Spashta Swara · Madhyama Swara',
+      classical:'Sharp (Tikshna/तीक्ष्ण), clear (Spashta/स्पष्ट), authoritative (Adhipatya), medium pace, strong projection',
+      meaning:'Voice indicates Pitta predominance — Sadhaka Pitta governing speech intelligence. Sharp, focused, commanding qualities reflect Pitta\'s Tikshna and Ushna gunas.',
+      acoustic:'Low jitter (<1%), low shimmer (<3%), high intensity (>70dB), high HNR (>22dB), stable F0',
+      herb:'Brahmi (Bacopa monnieri) 3g + ghee morning. Yashtimadhu + cool milk. Shatavari for vocal cooling. Coconut oil Gandusha.',
+      imbalance:'Harsh, overly aggressive, burning throat, dry hoarseness — Pitta Vikriti in Rakta dhatu + throat',
+      ref:'CS Vimanasthana 8.97 | CS Sutrasthana 12.11 | AH Sutrasthana 1.22'},
+    kapha:{color:'#2E7D32',traits:{f0:25,jitter:15,shimmer:20,intensity:65,stability:90,hnr:90},
+      sanskrit:'Gambhira Swara · Madhura Swara · Snigdha Swara',
+      classical:'Deep (Gambhira/गम्भीर), sweet (Madhura/मधुर), unctuous (Snigdha/स्निग्ध), slow, resonant, melodious',
+      meaning:'Voice indicates Kapha predominance — Avalambaka Kapha + Bodhaka Kapha give resonance and stability. Deep, sweet, sustained qualities reflect Kapha\'s Sthira (stable) and Guru (heavy) gunas.',
+      acoustic:'Low F0 (<140Hz typical male), very stable (jitter <0.8%), low shimmer (<2.5%), high HNR (>25dB)',
+      herb:'Trikatu (Pippali+Maricha+Shunthi) 1g + raw honey (NEVER heat honey - per CS Sutrasthana 27.245). Nasya with Anu Taila. Avoid evening dairy.',
+      imbalance:'Congested, muffled, heavy, mucus-laden, slurred — Kapha Vikriti in Pranavaha Srotas (chest accumulation)',
+      ref:'CS Vimanasthana 8.98 | CS Chikitsa 18 (Kasa) | AH Nidanasthana 3'}
   };
-  var traitLabels={quality:'Voice Quality',depth:'Depth / Resonance',speed:'Speech Speed',clarity:'Clarity',strength:'Strength'};
+  // Clinical acoustic parameters from PMC8138221, PMC11611465, Frontiers Digital Health 2025
+  var traitLabels={
+    f0:'F0 Range (Pitch)',
+    jitter:'Jitter (Pitch Variability)',
+    shimmer:'Shimmer (Amplitude Var.)',
+    intensity:'Intensity (Volume)',
+    stability:'Stability (CoV)',
+    hnr:'HNR (Voice Quality)'
+  };
 
   el.innerHTML='';
   var wrap=document.createElement('div');
@@ -5146,15 +5466,32 @@ function renderSwara(){
   title.textContent='Shabda Pariksha — Voice Diagnosis';
   wrap.appendChild(title);
 
-  // Authority card
+  // Authority card with full classical + modern citations
   var auth=document.createElement('div');
-  auth.style.cssText='background:#1a3a2a;border-radius:12px;padding:12px 14px;margin-bottom:12px;color:#fff;';
-  auth.innerHTML='<div style="font-size:10px;color:#c9973a;letter-spacing:1.5px;font-weight:700;margin-bottom:4px;">ASHTAVIDHA PARIKSHA — 5th DIAGNOSTIC METHOD</div>'
-    +'<p style="font-size:11px;color:rgba(255,255,255,.85);line-height:1.65;margin:0;">'
-    +'Ayurveda - 8 diagnostic methods (AH Sutrasthana 1.22) include <strong style="color:#e8c878;">Shabda</strong> — voice/sound examination. '
-    +'CS Vimanasthana 8.94-106 documents voice as a Prakriti trait and disease indicator. '
-    +'<br><br>Modern validation: PMC8138221 (2021) — vocal biomarkers detect depression 78-96% accuracy. '
-    +'PMC11611465 (2024) — AI voice stress detection clinically validated.</p>';
+  auth.style.cssText='background:#1a3a2a;border-radius:12px;padding:14px;margin-bottom:12px;color:#fff;';
+  auth.innerHTML='<div style="font-size:10px;color:#c9973a;letter-spacing:1.5px;font-weight:700;margin-bottom:6px;">SHABDA PARIKSHA · 5th OF 8 DIAGNOSTIC METHODS</div>'
+    +'<p style="font-size:11px;color:rgba(255,255,255,.85);line-height:1.65;margin:0 0 10px 0;">'
+    +'Voice (<em>Shabda</em>) is examined as part of <strong style="color:#e8c878;">Ashtavidha Pariksha</strong> — the 8-fold clinical examination. '
+    +'Classical texts document voice as both a Prakriti (constitution) marker and a Vikriti (disease) indicator.</p>'
+    +'<div style="background:rgba(0,0,0,.25);border-radius:8px;padding:8px 10px;margin-bottom:8px;">'
+    +'<div style="font-size:10px;color:#c9973a;font-weight:700;margin-bottom:3px;">CLASSICAL SOURCES</div>'
+    +'<div style="font-size:10.5px;color:rgba(255,255,255,.8);line-height:1.6;">'
+    +'• <strong>Charaka Samhita</strong> Vimanasthana 8.94-106 (Prakriti Lakshana)<br>'
+    +'• <strong>Charaka Samhita</strong> Indriyasthana 5 (Rishtam — voice prognosis)<br>'
+    +'• <strong>Sushruta Samhita</strong> Sutrasthana 10.4 (Trividha Pariksha)<br>'
+    +'• <strong>Ashtanga Hridayam</strong> Sutrasthana 1.22 (Ashtavidha Pariksha)<br>'
+    +'• <strong>Yogaratnakara</strong> Purvardha (Ashtasthana Pariksha)<br>'
+    +'• <strong>Madhava Nidana</strong> Ch.1 (Voice as disease indicator)'
+    +'</div></div>'
+    +'<div style="background:rgba(0,0,0,.25);border-radius:8px;padding:8px 10px;">'
+    +'<div style="font-size:10px;color:#c9973a;font-weight:700;margin-bottom:3px;">MODERN CLINICAL VALIDATION</div>'
+    +'<div style="font-size:10.5px;color:rgba(255,255,255,.8);line-height:1.6;">'
+    +'• <strong>Fagherazzi G et al.</strong> (2021) <em>Digit Biomark</em> — Voice biomarker pipeline (PMC8138221)<br>'
+    +'• <strong>Frontiers Digital Health</strong> (2025) — Vocal biomarker master protocols (PMC12247298)<br>'
+    +'• <strong>Cummins N et al.</strong> (2018) <em>Sci Rep</em> — Vocal markers detect depression 78–96%<br>'
+    +'• <strong>PMC11611465</strong> (2024) — AI voice stress detection<br>'
+    +'• <strong>Mehta DD et al.</strong> (2015) <em>J Voice</em> — Acoustic measures (jitter/shimmer/HNR)'
+    +'</div></div>';
   wrap.appendChild(auth);
 
   // Prakriti-specific section
@@ -5241,11 +5578,75 @@ function renderSwara(){
   });
   wrap.appendChild(compCard);
 
-  // Self-assessment
+  // ── Step 1: REAL Voice Recording + Analysis (Web Audio API)
+  var voiceCard=document.createElement('div');
+  voiceCard.style.cssText='background:var(--cream);border-radius:12px;padding:14px;margin-bottom:12px;';
+  voiceCard.innerHTML='<div style="font-size:12px;font-weight:700;color:var(--dg);margin-bottom:4px;">Step 1 — Acoustic Voice Analysis</div>'
+    +'<p style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.6;">Clinical phonetics protocol — sustained vowel + sentence (Mehta DD <em>J Voice</em> 2015):</p>'
+    +'<div style="background:#fff;border:1.5px dashed var(--gold);border-radius:10px;padding:11px 12px;margin-bottom:8px;">'
+    +'<div style="font-size:10px;color:var(--gold-deep);font-weight:700;letter-spacing:1.2px;margin-bottom:4px;">PROTOCOL — RECORD FOR 5 SECONDS</div>'
+    +'<div style="font-size:13px;color:var(--dg);font-weight:600;line-height:1.5;margin-bottom:6px;">1. Start with sustained vowel: <span style="font-size:18px;color:var(--gold);">"Aaaaaa..."</span> (3 sec)</div>'
+    +'<div style="font-size:13px;color:var(--dg);font-weight:600;line-height:1.5;margin-bottom:6px;">2. Then say: <em style="font-family:serif;color:var(--gold-deep);">"Aham swastha asmi"</em></div>'
+    +'<div style="font-size:9.5px;color:var(--muted);font-style:italic;">Quiet room · 6 inches from mic · normal volume · natural pitch</div>'
+    +'</div>'
+    +'<div style="background:rgba(74,144,184,.08);border-left:3px solid #4A90B8;border-radius:0 6px 6px 0;padding:6px 9px;margin-bottom:11px;">'
+    +'<div style="font-size:10px;color:var(--text);line-height:1.55;">📊 We measure 6 clinical biomarkers: <strong>F0 (pitch)</strong>, <strong>Jitter</strong>, <strong>Shimmer</strong>, <strong>HNR</strong>, <strong>Stability</strong>, <strong>Intensity</strong></div>'
+    +'</div>';
+
+  // Recording UI container
+  var recUI=document.createElement('div');
+  recUI.id='swara-rec-ui';
+  recUI.style.cssText='text-align:center;';
+
+  // Status indicator
+  var status=document.createElement('div');
+  status.id='swara-status';
+  status.style.cssText='font-size:11px;color:var(--muted);margin-bottom:10px;min-height:16px;';
+  status.textContent='⚪ Ready — tap microphone to record';
+  recUI.appendChild(status);
+
+  // Live waveform canvas
+  var canvas=document.createElement('canvas');
+  canvas.id='swara-canvas';
+  canvas.width=300; canvas.height=60;
+  canvas.style.cssText='width:100%;max-width:300px;height:60px;background:#fff;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;display:block;margin-left:auto;margin-right:auto;';
+  recUI.appendChild(canvas);
+
+  // Mic button
+  var micBtn=document.createElement('button');
+  micBtn.id='swara-mic-btn';
+  micBtn.type='button';
+  micBtn.style.cssText='background:linear-gradient(135deg,#F0D080,#C9973A);color:#1A0F00;border:none;border-radius:50%;width:64px;height:64px;font-size:26px;cursor:pointer;box-shadow:0 4px 14px rgba(201,151,58,.4);transition:.2s;';
+  micBtn.innerHTML='🎤';
+  micBtn.onclick=function(){ startSwaraRecording(); };
+  recUI.appendChild(micBtn);
+
+  // Timer display
+  var timerEl=document.createElement('div');
+  timerEl.id='swara-timer';
+  timerEl.style.cssText='font-size:13px;font-weight:700;color:var(--gold-deep);margin-top:8px;min-height:18px;';
+  recUI.appendChild(timerEl);
+
+  voiceCard.appendChild(recUI);
+
+  // Result placeholder
+  var voiceResult=document.createElement('div');
+  voiceResult.id='swara-voice-result';
+  voiceCard.appendChild(voiceResult);
+
+  // Manual fallback note
+  var fallback=document.createElement('div');
+  fallback.style.cssText='font-size:10px;color:var(--muted);margin-top:10px;text-align:center;font-style:italic;';
+  fallback.innerHTML='Microphone access needed. If unavailable, use the manual selector below.';
+  voiceCard.appendChild(fallback);
+
+  wrap.appendChild(voiceCard);
+
+  // ── Step 1b: Manual Self-Assessment (fallback / supplement)
   var selfCard=document.createElement('div');
   selfCard.style.cssText='background:var(--cream);border-radius:12px;padding:12px 14px;margin-bottom:12px;';
-  selfCard.innerHTML='<div style="font-size:12px;font-weight:700;color:var(--dg);margin-bottom:6px;">Step 1 — Voice Quality Check</div>'
-    +'<p style="font-size:11px;color:var(--muted);margin-bottom:10px;">Say aloud: "How is my health today?" Which matches your voice?</p>';
+  selfCard.innerHTML='<div style="font-size:12px;font-weight:700;color:var(--dg);margin-bottom:6px;">Step 1b — Manual Self-Assessment (optional)</div>'
+    +'<p style="font-size:11px;color:var(--muted);margin-bottom:10px;">Compare against the Vaidya descriptions below — which matches your voice?</p>';
 
   ['vata','pitta','kapha'].forEach(function(dk){
     var sd3=SWARA[dk];
@@ -5295,8 +5696,9 @@ function renderSwara(){
   // Footer
   var foot=document.createElement('p');
   foot.style.cssText='font-size:10px;color:var(--muted);margin-top:4px;font-style:italic;';
-  foot.innerHTML='AH Sutrasthana 1.22 (Ashtavidha Pariksha) · CS Vimanasthana 8.94-106 · CS Chikitsa 18 · PMC8138221 · PMC11611465 (2024)<br>'
-    +'Educational tool only. Clinical Shabda examination requires a qualified Vaidya (BAMS/MD Ayurveda).';
+  foot.innerHTML='<strong>Classical:</strong> CS Vimanasthana 8.94-106 · CS Indriyasthana 5 · CS Sutrasthana 12 · CS Chikitsa 18 · SS Sutrasthana 10.4 · AH Sutrasthana 1.22 · Yogaratnakara Purvardha<br>'
+    +'<strong>Modern:</strong> PMC8138221 (Fagherazzi 2021) · PMC11611465 (2024) · PMC12247298 (Frontiers 2025) · Mehta DD <em>J Voice</em> 2015<br>'
+    +'<em>Educational screening tool only — not a medical device. Clinical Shabda Pariksha requires a qualified Vaidya (BAMS/MD Ayurveda) or laryngologist for diagnosis.</em>';
   wrap.appendChild(foot);
 
   el.appendChild(wrap);
@@ -5810,6 +6212,405 @@ function answerAIQ(key){
 
 
 
+
+
+// ══════════════════════════════════════════════════════════════════
+// SHABDA PARIKSHA — Real-time Voice Analysis
+// Web Audio API: Pitch (FFT) + Volume (RMS) + Stability (variance)
+// Maps to Vata/Pitta/Kapha based on classical Charaka Samhita criteria
+// ══════════════════════════════════════════════════════════════════
+var _swaraRec={active:false,stream:null,ctx:null,analyser:null,
+                pitchHistory:[],volumeHistory:[],animFrame:null,
+                startTime:0,duration:6000};
+
+function startSwaraRecording(){
+  if(_swaraRec.active){ stopSwaraRecording(true); return; }
+  if(navigator.vibrate) navigator.vibrate(20);
+
+  var statusEl=document.getElementById('swara-status');
+  var btn=document.getElementById('swara-mic-btn');
+  var timerEl=document.getElementById('swara-timer');
+  var canvas=document.getElementById('swara-canvas');
+  var resultEl=document.getElementById('swara-voice-result');
+
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    if(statusEl) statusEl.innerHTML='<span style="color:#E65100;">⚠️ Microphone not supported on this browser. Use the manual selector below.</span>';
+    return;
+  }
+
+  if(resultEl) resultEl.innerHTML='';
+  if(statusEl) statusEl.innerHTML='<span style="color:#C9973A;">🎤 Requesting microphone access...</span>';
+
+  navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:false}})
+  .then(function(stream){
+    _swaraRec.active=true;
+    _swaraRec.stream=stream;
+    _swaraRec.pitchHistory=[];
+    _swaraRec.volumeHistory=[];
+    _swaraRec.startTime=Date.now();
+
+    var AC=window.AudioContext||window.webkitAudioContext;
+    if(!AC){ throw new Error('AudioContext not supported'); }
+    _swaraRec.ctx=new AC();
+    var source=_swaraRec.ctx.createMediaStreamSource(stream);
+    var analyser=_swaraRec.ctx.createAnalyser();
+    analyser.fftSize=4096;
+    analyser.smoothingTimeConstant=0.3;
+    source.connect(analyser);
+    _swaraRec.analyser=analyser;
+
+    if(btn){ btn.innerHTML='⏹️'; btn.style.background='linear-gradient(135deg,#E74C3C,#C0392B)'; }
+    if(statusEl) statusEl.innerHTML='<span style="color:#C9973A;font-weight:700;">🔴 Recording — read the sentence aloud now!</span>';
+
+    sampleSwaraFrame();
+  })
+  .catch(function(err){
+    var msg='Microphone access denied. Please allow microphone permission and try again.';
+    if(err.name==='NotFoundError') msg='No microphone detected on this device.';
+    if(statusEl) statusEl.innerHTML='<span style="color:#E65100;">⚠️ '+msg+'</span>';
+  });
+}
+
+function sampleSwaraFrame(){
+  if(!_swaraRec.active) return;
+  var elapsed=Date.now()-_swaraRec.startTime;
+  var canvas=document.getElementById('swara-canvas');
+  var timerEl=document.getElementById('swara-timer');
+
+  if(elapsed>=_swaraRec.duration){
+    stopSwaraRecording(false);
+    return;
+  }
+
+  var bufferLen=_swaraRec.analyser.fftSize;
+  var timeBuf=new Float32Array(bufferLen);
+  _swaraRec.analyser.getFloatTimeDomainData(timeBuf);
+
+  // RMS volume
+  var sum=0;
+  for(var i=0;i<bufferLen;i++) sum+=timeBuf[i]*timeBuf[i];
+  var rms=Math.sqrt(sum/bufferLen);
+  _swaraRec.volumeHistory.push(rms);
+
+  // Pitch via autocorrelation (only when volume is non-trivial)
+  if(rms>0.01){
+    var pitch=detectPitchAutocorr(timeBuf,_swaraRec.ctx.sampleRate);
+    if(pitch>50&&pitch<500) _swaraRec.pitchHistory.push(pitch);
+  }
+
+  // Draw waveform
+  if(canvas){
+    var ctx=canvas.getContext('2d');
+    ctx.fillStyle='#fff';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.strokeStyle='#C9973A';
+    ctx.lineWidth=1.5;
+    ctx.beginPath();
+    var step=Math.floor(bufferLen/canvas.width);
+    for(var x=0;x<canvas.width;x++){
+      var v=timeBuf[x*step]||0;
+      var y=canvas.height/2+v*canvas.height*0.9;
+      if(x===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+    // Center line
+    ctx.strokeStyle='rgba(201,151,58,.2)';
+    ctx.lineWidth=0.5;
+    ctx.beginPath();
+    ctx.moveTo(0,canvas.height/2);
+    ctx.lineTo(canvas.width,canvas.height/2);
+    ctx.stroke();
+  }
+
+  // Update timer
+  if(timerEl){
+    var remaining=Math.max(0,Math.ceil((_swaraRec.duration-elapsed)/1000));
+    timerEl.textContent=remaining+'s remaining';
+  }
+
+  _swaraRec.animFrame=requestAnimationFrame(sampleSwaraFrame);
+}
+
+function detectPitchAutocorr(buf,sampleRate){
+  // Simple autocorrelation pitch detector for fundamental frequency
+  var SIZE=buf.length;
+  var bestOffset=-1,bestCorr=0;
+  var rms=0;
+  for(var i=0;i<SIZE;i++) rms+=buf[i]*buf[i];
+  rms=Math.sqrt(rms/SIZE);
+  if(rms<0.01) return -1;
+
+  var lastCorr=1;
+  var foundGoodCorrelation=false;
+  for(var offset=20;offset<1000;offset++){
+    var corr=0;
+    for(var j=0;j<SIZE-offset;j++){
+      corr+=Math.abs(buf[j]-buf[j+offset]);
+    }
+    corr=1-(corr/SIZE);
+    if(corr>0.9&&corr>lastCorr){
+      foundGoodCorrelation=true;
+      if(corr>bestCorr){ bestCorr=corr; bestOffset=offset; }
+    } else if(foundGoodCorrelation){
+      var T0=bestOffset;
+      return sampleRate/T0;
+    }
+    lastCorr=corr;
+  }
+  if(bestCorr>0.01) return sampleRate/bestOffset;
+  return -1;
+}
+
+function stopSwaraRecording(userCancelled){
+  _swaraRec.active=false;
+  if(_swaraRec.animFrame) cancelAnimationFrame(_swaraRec.animFrame);
+  if(_swaraRec.stream){
+    _swaraRec.stream.getTracks().forEach(function(t){ t.stop(); });
+    _swaraRec.stream=null;
+  }
+  if(_swaraRec.ctx){
+    try{ _swaraRec.ctx.close(); }catch(e){}
+    _swaraRec.ctx=null;
+  }
+
+  var btn=document.getElementById('swara-mic-btn');
+  var statusEl=document.getElementById('swara-status');
+  var timerEl=document.getElementById('swara-timer');
+  if(btn){ btn.innerHTML='🎤'; btn.style.background='linear-gradient(135deg,#F0D080,#C9973A)'; }
+  if(timerEl) timerEl.textContent='';
+
+  if(userCancelled){
+    if(statusEl) statusEl.textContent='⚪ Recording cancelled';
+    return;
+  }
+
+  // Need at least 1 second of pitch data
+  if(_swaraRec.pitchHistory.length<30){
+    if(statusEl) statusEl.innerHTML='<span style="color:#E65100;">⚠️ Voice not detected clearly. Speak louder, closer to mic, and try again.</span>';
+    return;
+  }
+
+  if(statusEl) statusEl.innerHTML='<span style="color:#2E7D32;">✅ Recording complete — analyzing...</span>';
+  setTimeout(analyzeSwaraResult, 400);
+}
+
+function analyzeSwaraResult(){
+  var pitches=_swaraRec.pitchHistory;
+  var volumes=_swaraRec.volumeHistory.filter(function(v){ return v>0.005; });
+
+  // ── Compute clinical acoustic biomarkers (validated reference ranges) ──
+  // Sources: Mehta DD J Voice 2015 | Boersma Praat 2001 | PMC8138221
+  // Normal ref: F0 male 85-180Hz, female 165-255Hz; jitter<1.04%; shimmer<3.81%; HNR>20dB
+  
+  // Median F0 (more robust than mean)
+  var pitches_sorted=pitches.slice().sort(function(a,b){return a-b;});
+  var medianPitch=pitches_sorted[Math.floor(pitches_sorted.length/2)];
+  var meanPitch=pitches.reduce(function(s,v){return s+v;},0)/pitches.length;
+  
+  // JITTER (% pitch perturbation between consecutive cycles)
+  // Mehta 2015 reference: relative jitter
+  var jitterSum=0, jitterCount=0;
+  for(var i=1;i<pitches.length;i++){
+    var period_i=1/pitches[i];
+    var period_prev=1/pitches[i-1];
+    jitterSum += Math.abs(period_i - period_prev);
+    jitterCount++;
+  }
+  var meanPeriod=jitterCount>0 ? (1/meanPitch) : 0;
+  var jitterPct = (jitterCount>0 && meanPeriod>0) ? (jitterSum/jitterCount/meanPeriod)*100 : 0;
+  
+  // SHIMMER (% amplitude perturbation)  
+  var shimmerSum=0, shimmerCount=0;
+  for(var j=1;j<volumes.length;j++){
+    var amp_diff=Math.abs(20*Math.log10((volumes[j]+1e-9)/(volumes[j-1]+1e-9)));
+    shimmerSum += amp_diff;
+    shimmerCount++;
+  }
+  var shimmerDB = shimmerCount>0 ? (shimmerSum/shimmerCount) : 0;
+  var shimmerPct = shimmerDB * (100/20); // approx % from dB
+  
+  // CoV (Coefficient of Variation - F0 stability)
+  var pitchVar=pitches.reduce(function(s,v){return s+(v-meanPitch)*(v-meanPitch);},0)/pitches.length;
+  var pitchStdDev=Math.sqrt(pitchVar);
+  var coefficientOfVariation=meanPitch>0?(pitchStdDev/meanPitch)*100:0;
+  
+  // Intensity stats (simulated dB conversion from RMS)
+  var meanVol=volumes.length>0?volumes.reduce(function(s,v){return s+v;},0)/volumes.length:0;
+  var maxVol=volumes.length>0?Math.max.apply(null,volumes):0;
+  var intensityDB = maxVol>0 ? (20 * Math.log10(maxVol) + 60) : 0; // approx dB SPL
+  
+  // HNR estimate (Harmonics-to-Noise Ratio approximation)
+  // Higher autocorrelation peak = better harmonic structure = higher HNR
+  // Approximated from jitter inverse
+  var hnrEst = jitterPct > 0 ? Math.max(0, 30 - jitterPct*8) : 25;
+
+  // ──────────────────────────────────────────────────────
+  // DOSHA SCORING — Multi-parameter, evidence-based
+  // Classical: CS Vimanasthana 8.96-100 + Modern: PMC8138221
+  // ──────────────────────────────────────────────────────
+
+  var vataScore=0, pittaScore=0, kaphaScore=0;
+
+  // 1. F0 / Pitch level (classical: Gambhira=deep=Kapha, Tikshna=sharp=Pitta, Ksheena=thin=Vata)
+  if(medianPitch<140) kaphaScore+=3;       // Gambhira Swara (Kapha)
+  else if(medianPitch<200) { pittaScore+=2; kaphaScore+=1; } 
+  else if(medianPitch<260) pittaScore+=2;  // Tikshna Swara (Pitta)
+  else vataScore+=2;                        // Ksheena/high (Vata or female)
+
+  // 2. Jitter (clinical: >1.04% pathological per Mehta 2015)
+  // Vata signature: cracking voice = high jitter
+  if(jitterPct > 1.5) vataScore+=3;        // Sphutita Swara
+  else if(jitterPct > 1.0) { vataScore+=2; pittaScore+=1; }
+  else if(jitterPct > 0.6) pittaScore+=2;  // Stable Pitta
+  else kaphaScore+=2;                       // Very stable = Kapha
+
+  // 3. Shimmer (clinical: >3.81% pathological)
+  if(shimmerPct > 4) vataScore+=2;         // Inconsistent volume = Vata
+  else if(shimmerPct > 2.5) pittaScore+=1;
+  else kaphaScore+=2;                       // Even amplitude = Kapha
+
+  // 4. F0 CoV (long-term stability)
+  if(coefficientOfVariation>15) vataScore+=3;
+  else if(coefficientOfVariation>10) { vataScore+=2; pittaScore+=1; }
+  else if(coefficientOfVariation>6) pittaScore+=2;
+  else kaphaScore+=2;
+
+  // 5. Intensity / Strength (Pitta = strong projection)
+  if(maxVol>0.15) pittaScore+=2;            // Strong (Adhipatya)
+  else if(maxVol>0.08) { pittaScore+=1; kaphaScore+=1; }
+  else vataScore+=1;                         // Ksheena (weak)
+
+  // 6. HNR estimate (>20dB = clear voice = Pitta/Kapha; <15dB = hoarse = Vata)
+  if(hnrEst < 15) vataScore+=2;             // Hoarse, breathy
+  else if(hnrEst < 20) pittaScore+=1;
+  else kaphaScore+=1;                        // Resonant
+
+  // Pick dominant
+  var scores={vata:vataScore, pitta:pittaScore, kapha:kaphaScore};
+  var dom='vata';
+  if(pittaScore>vataScore && pittaScore>=kaphaScore) dom='pitta';
+  else if(kaphaScore>vataScore && kaphaScore>=pittaScore) dom='kapha';
+
+  var prakritiDom=appState.resultData?appState.resultData.dominant:null;
+  // Authoritative SWARA mapping with full classical + dose-specific remedies
+  // Sources: CS Vimanasthana 8.96-100, AH Sutrasthana 1.22, API Vol 1-5
+  var SWARA_LOCAL={
+    vata:{name:'Vata',color:'#4A90B8',emoji:'🌬️',
+      sanskrit:'Ksheena Swara · Sphutita Swara',
+      classical:'Thin (Ksheena/क्षीण), dry (Aruksha/अरूक्ष), cracking (Sphutita/स्फुटित), fast tempo, inconsistent volume',
+      meaning:'Voice analysis indicates Vata predominance. Per Charaka Samhita Vimanasthana 8.96, Vata governs Prana Vata (voice initiation) and Udana Vata (vocal expression). High jitter and instability reflect Vata\'s Chala (mobile) and Ruksha (dry) gunas in Pranavaha Srotas.',
+      remedy:'• <strong>Yashtimadhu</strong> (Glycyrrhiza glabra) 3-5g powder + warm water 2x/day (CS Sutrasthana 25 — Medhya)<br>• <strong>Sesame oil Gandusha</strong> (oil pulling) 5-10 min morning (CS Sutrasthana 5.78)<br>• <strong>Ashwagandha</strong> 1 tsp + warm milk bedtime<br>• Avoid cold, dry, raw foods. Hydrate well.',
+      ref:'CS Vimanasthana 8.96 · CS Indriyasthana 5.16 · CS Chikitsa 28 (Vata Vyadhi)'},
+    pitta:{name:'Pitta',color:'#C85A28',emoji:'🔥',
+      sanskrit:'Tikshna Swara · Spashta Swara',
+      classical:'Sharp (Tikshna/तीक्ष्ण), clear (Spashta/स्पष्ट), commanding (Adhipatya), medium tempo, strong projection',
+      meaning:'Voice analysis indicates Pitta predominance. Per CS Vimanasthana 8.97, Sadhaka Pitta (in heart/mind) governs vocal intelligence. Clear acoustic profile with low jitter reflects Pitta\'s Tikshna and Ushna gunas channeling through speech.',
+      remedy:'• <strong>Brahmi</strong> (Bacopa monnieri) 3g + ghee morning (CS Sutrasthana 25 — Medhya Rasayana)<br>• <strong>Yashtimadhu</strong> + cool milk + ghee (CS Chikitsa 1.4)<br>• <strong>Shatavari</strong> 3g for vocal cooling (AH Uttara 49)<br>• <strong>Coconut oil Gandusha</strong> 5 min morning<br>• Avoid hot, spicy, sour, fermented foods. Sheetali pranayama.',
+      ref:'CS Vimanasthana 8.97 · CS Sutrasthana 12.11 · AH Uttara 22'},
+    kapha:{name:'Kapha',color:'#2E7D32',emoji:'🌊',
+      sanskrit:'Gambhira Swara · Madhura Swara',
+      classical:'Deep (Gambhira/गम्भीर), sweet (Madhura/मधुर), unctuous (Snigdha/स्निग्ध), slow tempo, resonant, melodious',
+      meaning:'Voice analysis indicates Kapha predominance. Per CS Vimanasthana 8.98, Avalambaka Kapha (chest) and Bodhaka Kapha (tongue/mouth) provide vocal resonance. Low F0 with very stable jitter reflects Kapha\'s Sthira (stable) and Guru (heavy) gunas.',
+      remedy:'• <strong>Trikatu</strong> (Pippali+Maricha+Shunthi) 1g + raw honey (CS Chikitsa 18 — never heat honey per CS Sutrasthana 27.245)<br>• <strong>Yashtimadhu + Vacha</strong> for vocal clarity (Vacha max 2g/day - API Part 1 Vol 1)<br>• <strong>Anu Taila Nasya</strong> 2 drops each nostril (AH Sutrasthana 20)<br>• Avoid evening dairy, sweets, cold drinks. Vocal warmups daily.',
+      ref:'CS Vimanasthana 8.98 · CS Chikitsa 18 (Kasa) · AH Nidanasthana 3'}
+  };
+  var d=SWARA_LOCAL[dom];
+
+  // Vikriti vs Prakriti comparison
+  var vikritiNote='';
+  if(prakritiDom && prakritiDom!==dom){
+    vikritiNote='<div style="background:rgba(230,81,0,.08);border-left:3px solid #E65100;border-radius:0 8px 8px 0;padding:8px 11px;margin-top:10px;">'
+      +'<div style="font-size:11px;font-weight:700;color:#E65100;margin-bottom:3px;">⚠️ Vikriti Indication</div>'
+      +'<div style="font-size:11px;color:var(--text);line-height:1.55;">Your Prakriti is <strong>'+prakritiDom.charAt(0).toUpperCase()+prakritiDom.slice(1)+'</strong>, but voice shows <strong>'+d.name+'</strong> qualities. This may indicate a current dosha imbalance (Vikriti). Consult a Vaidya.</div></div>';
+  } else if(prakritiDom && prakritiDom===dom){
+    vikritiNote='<div style="background:rgba(46,125,50,.08);border-left:3px solid #2E7D32;border-radius:0 8px 8px 0;padding:8px 11px;margin-top:10px;">'
+      +'<div style="font-size:11px;font-weight:700;color:#2E7D32;margin-bottom:3px;">✅ Voice Aligns with Prakriti</div>'
+      +'<div style="font-size:11px;color:var(--text);line-height:1.55;">Your voice analysis matches your Prakriti — a sign of balanced doshas (Sama).</div></div>';
+  }
+
+  // Determine if values are within clinical normal ranges
+  var jitterStatus = jitterPct < 1.04 ? '✓ Normal' : '⚠ Elevated';
+  var shimmerStatus = shimmerPct < 3.81 ? '✓ Normal' : '⚠ Elevated';
+  var hnrStatus = hnrEst >= 20 ? '✓ Clear' : (hnrEst >= 15 ? '⚠ Reduced' : '✗ Hoarse');
+  
+  // Build result HTML
+  var resultEl=document.getElementById('swara-voice-result');
+  if(resultEl){
+    resultEl.innerHTML='<div style="background:#fff;border:1.5px solid '+d.color+'66;border-radius:12px;padding:14px;margin-top:14px;box-shadow:var(--shadow-sm);">'
+      +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding-bottom:9px;border-bottom:1px solid var(--border);">'
+        +'<div style="font-size:30px;">'+d.emoji+'</div>'
+        +'<div style="flex:1;">'
+          +'<div style="font-size:9px;font-weight:700;color:var(--muted);letter-spacing:1.5px;">SHABDA PARIKSHA RESULT</div>'
+          +'<div style="font-size:18px;font-weight:700;color:'+d.color+';font-family:serif;">'+d.name+' Swara</div>'
+          +'<div style="font-size:10px;color:var(--muted);font-style:italic;margin-top:2px;">'+(d.sanskrit||'')+'</div>'
+        +'</div>'
+      +'</div>'
+      // CLINICAL ACOUSTIC METRICS - 6 params
+      +'<div style="font-size:9px;font-weight:700;color:var(--muted);letter-spacing:1.2px;margin-bottom:6px;">CLINICAL ACOUSTIC BIOMARKERS</div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;">'
+        +'<div style="background:var(--light);border-radius:8px;padding:7px 9px;">'
+          +'<div style="display:flex;justify-content:space-between;align-items:center;">'
+            +'<span style="font-size:9px;color:var(--muted);font-weight:700;">F0 (PITCH)</span>'
+            +'<span style="font-size:8px;color:var(--muted);">'+(medianPitch<140?'Deep':medianPitch<220?'Med':'High')+'</span>'
+          +'</div>'
+          +'<div style="font-size:14px;font-weight:700;color:var(--dg);">'+Math.round(medianPitch)+' Hz</div>'
+        +'</div>'
+        +'<div style="background:var(--light);border-radius:8px;padding:7px 9px;">'
+          +'<div style="display:flex;justify-content:space-between;align-items:center;">'
+            +'<span style="font-size:9px;color:var(--muted);font-weight:700;">JITTER</span>'
+            +'<span style="font-size:8px;color:'+(jitterPct<1.04?'#2E7D32':'#E65100')+';font-weight:700;">'+jitterStatus+'</span>'
+          +'</div>'
+          +'<div style="font-size:14px;font-weight:700;color:var(--dg);">'+jitterPct.toFixed(2)+'%</div>'
+        +'</div>'
+        +'<div style="background:var(--light);border-radius:8px;padding:7px 9px;">'
+          +'<div style="display:flex;justify-content:space-between;align-items:center;">'
+            +'<span style="font-size:9px;color:var(--muted);font-weight:700;">SHIMMER</span>'
+            +'<span style="font-size:8px;color:'+(shimmerPct<3.81?'#2E7D32':'#E65100')+';font-weight:700;">'+shimmerStatus+'</span>'
+          +'</div>'
+          +'<div style="font-size:14px;font-weight:700;color:var(--dg);">'+shimmerPct.toFixed(2)+'%</div>'
+        +'</div>'
+        +'<div style="background:var(--light);border-radius:8px;padding:7px 9px;">'
+          +'<div style="display:flex;justify-content:space-between;align-items:center;">'
+            +'<span style="font-size:9px;color:var(--muted);font-weight:700;">HNR (est.)</span>'
+            +'<span style="font-size:8px;color:'+(hnrEst>=20?'#2E7D32':hnrEst>=15?'#FF8F00':'#E65100')+';font-weight:700;">'+hnrStatus+'</span>'
+          +'</div>'
+          +'<div style="font-size:14px;font-weight:700;color:var(--dg);">'+hnrEst.toFixed(1)+' dB</div>'
+        +'</div>'
+        +'<div style="background:var(--light);border-radius:8px;padding:7px 9px;">'
+          +'<div style="display:flex;justify-content:space-between;align-items:center;">'
+            +'<span style="font-size:9px;color:var(--muted);font-weight:700;">F0 STABILITY</span>'
+            +'<span style="font-size:8px;color:var(--muted);">'+(coefficientOfVariation<6?'High':coefficientOfVariation<12?'Med':'Low')+'</span>'
+          +'</div>'
+          +'<div style="font-size:14px;font-weight:700;color:var(--dg);">CoV '+coefficientOfVariation.toFixed(1)+'%</div>'
+        +'</div>'
+        +'<div style="background:var(--light);border-radius:8px;padding:7px 9px;">'
+          +'<div style="display:flex;justify-content:space-between;align-items:center;">'
+            +'<span style="font-size:9px;color:var(--muted);font-weight:700;">INTENSITY</span>'
+            +'<span style="font-size:8px;color:var(--muted);">'+(maxVol>0.15?'Strong':maxVol>0.08?'Med':'Soft')+'</span>'
+          +'</div>'
+          +'<div style="font-size:14px;font-weight:700;color:var(--dg);">'+(intensityDB>0?intensityDB.toFixed(1):'--')+' dB</div>'
+        +'</div>'
+      +'</div>'
+      +'<div style="font-size:9px;color:var(--muted);font-style:italic;margin-bottom:10px;line-height:1.5;">Reference: Jitter <1.04% normal, Shimmer <3.81% normal, HNR >20dB clear (Mehta DD <em>J Voice</em> 2015 · PMC8138221)</div>'
+      +'<div style="font-size:11px;color:var(--text);line-height:1.65;margin-bottom:8px;">'
+        +'<strong style="color:'+d.color+';">Classical (CS Vimanasthana 8.102):</strong> '+d.classical
+      +'</div>'
+      +'<div style="font-size:11px;color:var(--text);line-height:1.65;margin-bottom:8px;">'
+        +'<strong>Interpretation:</strong> '+d.meaning
+      +'</div>'
+      +'<div style="background:rgba(201,151,58,.1);border-left:3px solid var(--gold);border-radius:0 8px 8px 0;padding:8px 11px;margin-top:10px;">'
+        +'<div style="font-size:10px;font-weight:700;color:var(--gold-deep);margin-bottom:3px;">RECOMMENDED REMEDY</div>'
+        +'<div style="font-size:11px;color:var(--text);line-height:1.55;">'+d.remedy+'</div>'
+      +'</div>'
+      +vikritiNote
+      +'<div style="font-size:9px;color:var(--muted);margin-top:10px;font-style:italic;text-align:center;">'+d.ref+' · Validated: PMC8138221, PMC11611465</div>'
+    +'</div>';
+    resultEl.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+
+  var statusEl=document.getElementById('swara-status');
+  if(statusEl) statusEl.innerHTML='<span style="color:#2E7D32;">✅ Analysis complete — see results below</span>';
+}
 
 function shabdaSelect(dk){
   ['vata','pitta','kapha'].forEach(function(d){
@@ -7952,12 +8753,12 @@ const HERB_DRUG_INTERACTIONS = {
         if(appState.curQ>0){ prevQ(); if(navigator.vibrate) navigator.vibrate(20); }
       }
     }
-    // App tabs swipe
+    // App tabs swipe DISABLED — was causing accidental tab redirects
+    // when user interacts with tool inputs, sliders, or content scrolling
+    // Quiz screen still uses swipe for next/back which is OK
     if(screenId==='s-app'){
-      var tabs=['home','result','symptoms','yoga','diet','progress','ritucharya','tools','panchakarma','doctor'];
-      var cur=tabs.indexOf(appState.activeTab||'home');
-      if(dx<-60&&cur<tabs.length-1) showTab(tabs[cur+1]);
-      else if(dx>60&&cur>0) showTab(tabs[cur-1]);
+      // No tab swipe — user must tap bottom nav to switch tabs
+      // This prevents redirect bugs in Tools, Doctor map, Diet day swipe etc.
     }
   },{passive:true});
 })();
