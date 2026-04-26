@@ -1467,7 +1467,7 @@ const QS=[
   {cat:"Body Frame",q:"How would you describe your natural body frame?",hint:"Think about your natural build before any weight changes",opts:[{i:"🦴",t:"Thin, bony, light — hard to gain weight",s:{v:3,p:1,k:0}},{i:"💪",t:"Medium, muscular, well-proportioned",s:{v:1,p:3,k:1}},{i:"🌊",t:"Large, heavy, solid — gain weight easily",s:{v:0,p:1,k:3}}]},
   {cat:"Skin & Hair",q:"What best describes your skin and hair?",hint:"Without skincare products",opts:[{i:"🌬️",t:"Dry, rough skin; thin, brittle hair",s:{v:3,p:0,k:1}},{i:"🔥",t:"Warm, oily skin; fine hair; early greying",s:{v:0,p:3,k:1}},{i:"💧",t:"Thick oily cool skin; thick lustrous wavy hair",s:{v:0,p:1,k:3}}]},
   {cat:"Digestion",q:"How is your digestion and appetite?",hint:"Your general pattern, not occasional days",opts:[{i:"🌀",t:"Irregular appetite; bloating and gas common",s:{v:3,p:0,k:1}},{i:"⚡",t:"Strong appetite — irritable if meal is missed",s:{v:1,p:3,k:0}},{i:"🐢",t:"Slow but steady; can easily skip meals",s:{v:0,p:1,k:3}}]},
-  {cat:"Sleep",q:"How do you typically sleep?",hint:"Your pattern over recent months — not during illness",opts:[{i:"🌙",t:"Light, disturbed sleep; vivid or fearful dreams; under 6 hrs",s:{v:3,p:0,k:0}},{i:"😴",t:"Moderate 6–8 hrs; intense or vivid dreams; may wake mid-sleep",s:{v:1,p:2,k:0}},{i:"😪",t:"Deep, heavy sleep; 8+ hrs; hard to wake; very refreshed or groggy",s:{v:0,p:0,k:3}}]},
+  {cat:"Sleep",q:"How do you typically sleep?",hint:"Your pattern over recent months — not during illness",opts:[{i:"🌙",t:"Light, disturbed sleep; vivid or fearful dreams; under 6 hrs",s:{v:3,p:0,k:0}},{i:"😴",t:"Moderate 6–8 hrs; intense or vivid dreams; may wake mid-sleep",s:{v:1,p:3,k:0}},{i:"😪",t:"Deep, heavy sleep; 8+ hrs; hard to wake; very refreshed or groggy",s:{v:0,p:0,k:3}}]},
   {cat:"Mind & Emotions",q:"What best describes your mental pattern?",hint:"Your underlying nature, not just current stress",opts:[{i:"🦋",t:"Quick thinking, creative, anxious; mind races",s:{v:3,p:1,k:0}},{i:"🦅",t:"Sharp, focused, intense; can be critical or impatient",s:{v:1,p:3,k:0}},{i:"🐘",t:"Calm, stable, patient; slow to anger; great long-term memory",s:{v:0,p:1,k:3}}]},
   {cat:"Energy",q:"How is your energy and activity level?",hint:"Your natural tendency, not your goal",opts:[{i:"🏃",t:"Bursts of energy then fatigue; restless; hard to sit still",s:{v:3,p:1,k:0}},{i:"🏊",t:"Sustained, competitive energy; driven; burns out if overworked",s:{v:1,p:3,k:0}},{i:"🧘",t:"Slow to start but excellent stamina; steady and consistent once going",s:{v:0,p:0,k:3}}]},
   {cat:"Temperature",q:"What climate do you prefer?",hint:"When you feel most comfortable",opts:[{i:"☀️",t:"Love warmth; hate cold; feel stiff in winter",s:{v:3,p:1,k:0}},{i:"❄️",t:"Prefer cool; dislike heat; overheat easily",s:{v:0,p:3,k:1}},{i:"🌤️",t:"Dislike cold and damp; prefer warm dry weather",s:{v:1,p:0,k:3}}]},
@@ -1907,6 +1907,10 @@ function showScreen(id){
 }
 function chooseMode(m){
   appState.mode=m;
+  // Request notification permission when entering doctor mode
+  if(m==='doctor' && typeof Notification!=='undefined' && Notification.permission==='default'){
+    Notification.requestPermission();
+  }
   document.getElementById('mc-patient').classList.toggle('chosen',m==='patient');
   document.getElementById('mc-doctor').classList.toggle('chosen',m==='doctor');
 }
@@ -2257,7 +2261,7 @@ var _patientStore={
       this._save(arr);
     }
   },
-  delete:function(id){
+  remove:function(id){
     var arr=this._getAll().filter(function(p){return p.id!==id;});
     this._save(arr);
   },
@@ -2303,9 +2307,12 @@ function checkDoctorNotifications(){
 
 function renderDoctorHome(){
   const hc=document.getElementById('tab-home');
-  if(_doctorState.activeView==='addPatient'){ renderAddPatientForm(); return; }
-  if(_doctorState.activeView==='patientDetail'){ renderPatientDetail(_doctorState.activePatientId); return; }
-  if(_doctorState.activeView==='addVisit'){ renderAddVisitForm(_doctorState.activePatientId); return; }
+  var v=_doctorState.activeView||'list';
+  if(v==='addPatient'){ renderAddPatientForm(); return; }
+  if(v==='patientDetail'){ renderPatientDetail(_doctorState.activePatientId); return; }
+  if(v==='addVisit'){ renderAddVisitForm(_doctorState.activePatientId); return; }
+  // 'list' or any unrecognized view → show patient list
+  _doctorState.activeView='list';
   renderPatientList();
 }
 
@@ -2317,10 +2324,62 @@ function openAddPatient(){ _doctorState.activeView='addPatient'; renderDoctorHom
 function openPatientList(){ _doctorState.activeView='list'; renderDoctorHome(); }
 function deletePatientById(id,name){
   if(confirm('Delete patient '+name+'?')){
-    _patientStore.delete(id);
+    _patientStore.remove(id);
     _doctorState.activeView='list';
     renderDoctorHome();
   }
+}
+
+function sendPatientNotification(patientName, message){
+  // Browser push notification (if granted)
+  if(typeof Notification!=='undefined' && Notification.permission==='granted'){
+    try{
+      new Notification('AyurMind AI — ' + patientName, {
+        body: message,
+        icon: 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌿</text></svg>',
+        tag: 'ayurmind-' + patientName
+      });
+    }catch(e){}
+  }
+  // Always show in-app notification too
+  checkDoctorNotifications();
+}
+
+function notifyPatientAppointment(id){
+  var p=_patientStore.getById(id);
+  if(!p) return;
+  var apptStr=p.nextAppointment?new Date(p.nextAppointment).toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'}):'';
+  var msg=apptStr?'Your appointment is scheduled for '+apptStr+' at the clinic.':'Please contact the clinic for your appointment details.';
+  sendPatientNotification(p.name, msg);
+  alert('Notification sent for: '+p.name+'\n'+msg+'\n\n(Browser notification sent if permission granted)');
+}
+
+function generatePatientAISummary(id){
+  var p=_patientStore.getById(id);
+  if(!p) return;
+  var el=document.getElementById('patient-ai-summary-'+id);
+  if(!el) return;
+  el.innerHTML='<div style="display:flex;align-items:center;gap:8px;"><div style="width:16px;height:16px;border:2px solid rgba(201,151,58,.3);border-top-color:#C9973A;border-radius:50%;animation:spin 1s linear infinite;"></div><span>Generating AI analysis...</span></div>';
+  
+  // Build patient context for AI
+  var visits=p.history||[];
+  var visitSummary=visits.slice(0,3).map(function(v,i){
+    return 'Visit '+(visits.length-i)+' ('+new Date(v.date).toLocaleDateString('en-IN')+'): '
+      +(v.complaint?'Complaint: '+v.complaint+'. ':' ')
+      +(v.treatment?'Treatment: '+v.treatment+'. ':' ')
+      +(v.herbs?'Herbs: '+v.herbs+'. ':' ')
+      +(v.notes?'Notes: '+v.notes:'');
+  }).join('\n');
+  
+  var prakritiName=p.prakriti?p.prakriti.charAt(0).toUpperCase()+p.prakriti.slice(1):'Unknown';
+  var prompt='You are AyurMind AI, an Ayurvedic clinical assistant. Summarize this patient case concisely for a Vaidya (Ayurvedic doctor). Use classical Ayurvedic terminology. Keep under 120 words.\n\n'
+    +'Patient: '+p.name+', '+p.age+' yrs, '+(p.gender||'')+'.\n'
+    +'Prakriti: '+prakritiName+' dominant.\n'
+    +'Chief Complaint: '+(p.complaint||'Not recorded')+'\n'
+    +'Recent visits: '+(visitSummary||'None recorded')+'\n\n'
+    +'Provide: 1) Brief dosha assessment 2) Key therapeutic focus 3) One classical herb recommendation with source.';
+  
+  callClaudeAPI(prompt, el, function(){ /* done */ });
 }
 function renderPatientList(){
   const hc=document.getElementById('tab-home');
@@ -2576,6 +2635,16 @@ function renderPatientDetail(id){
 
   // Add Visit button
   h+='<button onclick="openAddVisit(\'' + id + '\')" style="width:100%;padding:12px;background:rgba(74,158,122,.2);border:1.5px solid rgba(74,158,122,.5);border-radius:11px;color:#7AC4A0;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:12px;">➕ Record New Visit / Consultation</button>';
+
+  // ── AyurMind AI Summary + Notification section
+  h+='<div style="background:linear-gradient(135deg,#1A3A2A,#0B2318);border:1.5px solid rgba(201,151,58,.4);border-radius:12px;padding:14px;margin-bottom:12px;">'
+    +'<div style="font-size:10px;font-weight:700;color:#C9973A;letter-spacing:1px;margin-bottom:8px;">✦ AYURMIND AI — PATIENT HEALTH SUMMARY</div>'
+    +'<div id="patient-ai-summary-'+id+'" style="font-size:11px;color:rgba(255,255,255,.75);line-height:1.65;min-height:36px;font-style:italic;">Tap Generate to get AI clinical summary for this patient.</div>'
+    +'<div style="display:flex;gap:8px;margin-top:10px;">'
+    +'<button data-pid="'+id+'" onclick="generatePatientAISummary(this.dataset.pid)" style="flex:2;padding:10px;background:linear-gradient(135deg,#C9973A,#8B6914);border:none;border-radius:9px;color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;">✦ Generate AI Summary</button>'
+    +'<button data-pid="'+id+'" onclick="notifyPatientAppointment(this.dataset.pid)" style="flex:1;padding:10px;background:rgba(74,158,122,.2);border:1.5px solid rgba(74,158,122,.5);border-radius:9px;color:#7AC4A0;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;">🔔 Notify</button>'
+    +'</div>'
+  +'</div>';
 
   // Visit history
   var visits=p.history||[];
