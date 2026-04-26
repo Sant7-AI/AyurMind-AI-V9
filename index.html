@@ -2217,11 +2217,443 @@ function renderHome(){
   }
 }
 
-const MOCK_PATIENTS=[{name:"Priya Kulkarni",age:34,prakriti:"pitta",complaint:"Acidity & skin rash",time:"Today, 10:30 AM"},{name:"Ramesh Patil",age:52,prakriti:"kapha",complaint:"Weight gain & fatigue",time:"Today, 11:45 AM"},{name:"Sunita Desai",age:28,prakriti:"vata",complaint:"Anxiety & insomnia",time:"Yesterday"},{name:"Arun Joshi",age:45,prakriti:"pitta",complaint:"Hypertension & anger",time:"Yesterday"},{name:"Meena Nair",age:61,prakriti:"kapha",complaint:"Joint pain & congestion",time:"2 days ago"}];
+// ═══════════════════════════════════════════════════════════
+// PATIENT MANAGEMENT SYSTEM — Vaidya (Doctor) Mode
+// Per NABH Ayurveda hospital standards + CS Vimanasthana 4 (Rogi Pariksha)
+// AH Sutrasthana 1.25 — Dashvidha Pariksha fields
+// ═══════════════════════════════════════════════════════════
+
+// Persistent patient store — localStorage-backed
+var _patientStore={
+  _getAll:function(){
+    try{var d=localStorage.getItem('aym_patients');return d?JSON.parse(d):[];}catch(e){return[];}
+  },
+  _save:function(arr){
+    try{localStorage.setItem('aym_patients',JSON.stringify(arr));}catch(e){}
+  },
+  add:function(p){
+    var arr=this._getAll();
+    p.id='P'+Date.now();
+    p.createdAt=new Date().toISOString();
+    p.history=[];
+    arr.unshift(p);
+    this._save(arr);
+    return p;
+  },
+  update:function(id,fields){
+    var arr=this._getAll();
+    var i=arr.findIndex(function(p){return p.id===id;});
+    if(i>=0){arr[i]=Object.assign(arr[i],fields);this._save(arr);}
+  },
+  addVisit:function(id,visit){
+    var arr=this._getAll();
+    var i=arr.findIndex(function(p){return p.id===id;});
+    if(i>=0){
+      arr[i].history=arr[i].history||[];
+      visit.visitId='V'+Date.now();
+      visit.date=new Date().toISOString();
+      arr[i].history.unshift(visit);
+      arr[i].lastVisit=visit.date;
+      this._save(arr);
+    }
+  },
+  delete:function(id){
+    var arr=this._getAll().filter(function(p){return p.id!==id;});
+    this._save(arr);
+  },
+  getById:function(id){
+    return this._getAll().find(function(p){return p.id===id;})||null;
+  },
+  getDueForFollowup:function(){
+    var now=new Date();
+    return this._getAll().filter(function(p){
+      if(!p.nextAppointment) return false;
+      var d=new Date(p.nextAppointment);
+      var diffDays=Math.round((d-now)/(1000*60*60*24));
+      return diffDays<=3 && diffDays>=0;
+    });
+  }
+};
+
+// App state for doctor mode
+var _doctorState={activeView:'list',activePatientId:null};
+
+// Check for upcoming appointments and show notification
+function checkDoctorNotifications(){
+  var due=_patientStore.getDueForFollowup();
+  if(due.length>0){
+    var el=document.getElementById('doctor-notif');
+    if(el){
+      el.innerHTML='<div style="background:linear-gradient(135deg,rgba(201,151,58,.2),rgba(201,151,58,.08));border:1.5px solid #C9973A;border-radius:12px;padding:11px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;">'
+        +'<div style="font-size:22px;">🔔</div>'
+        +'<div style="flex:1;">'
+          +'<div style="font-size:12px;font-weight:700;color:#E8C070;margin-bottom:2px;">'+due.length+' Appointment'+(due.length>1?'s':'')+' Coming Up</div>'
+          +'<div style="font-size:10px;color:rgba(255,255,255,.8);">'+due.map(function(p){
+            var d=new Date(p.nextAppointment);
+            var today=new Date();
+            var diff=Math.round((d-today)/(1000*60*60*24));
+            return p.name+(diff===0?' — Today':diff===1?' — Tomorrow':' — in '+diff+' days');
+          }).join(' · ')+'</div>'
+        +'</div>'
+      +'</div>';
+      el.style.display='block';
+    }
+  }
+}
 
 function renderDoctorHome(){
   const hc=document.getElementById('tab-home');
-  hc.innerHTML=`<div class="fade-in"><div class="dmode-banner"><h3>🩺 Doctor / Vaidya Mode</h3><p>View recent patient assessments and manage consultations</p></div><p class="section-label">RECENT PATIENTS</p>${MOCK_PATIENTS.map(p=>`<div class="patient-row"><div class="pr-avatar pr-${p.prakriti}">${PD[p.prakriti].emoji}</div><div class="pr-info"><h4>${p.name}</h4><p>${p.age} yrs · ${p.complaint}</p></div><div class="pr-right"><span class="pill ${p.prakriti==='vata'?'pill-blue':p.prakriti==='pitta'?'pill-red':'pill-green'}">${PD[p.prakriti].name}</span><div class="pr-time">${p.time}</div></div></div>`).join('')}<div class="card" style="margin-top:14px;"><div class="card-title"><span class="ci">📋</span>Quick Actions</div><div style="display:flex;flex-direction:column;gap:8px;"><button class="btn btn-gold btn-full" onclick="setMode('patient');enterApp()">➕ New Patient Assessment</button><button class="btn btn-green btn-full" onclick="showTab('doctor')">🏥 Nearby Ayurvedic Hospitals</button></div></div></div>`;
+  if(_doctorState.activeView==='addPatient'){ renderAddPatientForm(); return; }
+  if(_doctorState.activeView==='patientDetail'){ renderPatientDetail(_doctorState.activePatientId); return; }
+  if(_doctorState.activeView==='addVisit'){ renderAddVisitForm(_doctorState.activePatientId); return; }
+  renderPatientList();
+}
+
+
+// Doctor mode navigation helpers — avoids quote escaping issues in dynamic HTML
+function openPatientView(id){ _doctorState.activeView='patientDetail'; _doctorState.activePatientId=id; renderDoctorHome(); }
+function openAddVisit(id){ _doctorState.activeView='addVisit'; _doctorState.activePatientId=id; renderDoctorHome(); }
+function openAddPatient(){ _doctorState.activeView='addPatient'; renderDoctorHome(); }
+function openPatientList(){ _doctorState.activeView='list'; renderDoctorHome(); }
+function deletePatientById(id,name){
+  if(confirm('Delete patient '+name+'?')){
+    _patientStore.delete(id);
+    _doctorState.activeView='list';
+    renderDoctorHome();
+  }
+}
+function renderPatientList(){
+  const hc=document.getElementById('tab-home');
+  var patients=_patientStore._getAll();
+  var due=_patientStore.getDueForFollowup();
+
+  var h='<div class="fade-in">';
+  // Header
+  h+='<div class="dmode-banner"><h3>🩺 Vaidya Dashboard</h3><p>Patient management · Appointments · Treatment history</p></div>';
+  
+  // Notification badge
+  h+='<div id="doctor-notif" style="display:none;"></div>';
+  
+  // Stats row
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">'
+    +'<div style="background:#1A3A2A;border:1px solid rgba(201,151,58,.3);border-radius:10px;padding:10px;text-align:center;">'
+      +'<div style="font-size:22px;font-weight:700;color:#E8C070;">'+patients.length+'</div>'
+      +'<div style="font-size:9px;color:rgba(255,255,255,.6);letter-spacing:.5px;">PATIENTS</div>'
+    +'</div>'
+    +'<div style="background:#1A3A2A;border:1px solid rgba(201,151,58,.3);border-radius:10px;padding:10px;text-align:center;">'
+      +'<div style="font-size:22px;font-weight:700;color:#4ADE80;">'+due.length+'</div>'
+      +'<div style="font-size:9px;color:rgba(255,255,255,.6);letter-spacing:.5px;">DUE TODAY</div>'
+    +'</div>'
+    +'<div style="background:#1A3A2A;border:1px solid rgba(201,151,58,.3);border-radius:10px;padding:10px;text-align:center;">'
+      +'<div style="font-size:22px;font-weight:700;color:#C9973A;">'+(patients.reduce(function(s,p){return s+(p.history?p.history.length:0);},0))+'</div>'
+      +'<div style="font-size:9px;color:rgba(255,255,255,.6);letter-spacing:.5px;">VISITS</div>'
+    +'</div>'
+  +'</div>';
+
+  // Upcoming appointments alert
+  if(due.length>0){
+    h+='<div style="background:rgba(201,151,58,.12);border:1.5px solid rgba(201,151,58,.5);border-radius:12px;padding:11px 14px;margin-bottom:12px;">'
+      +'<div style="font-size:10px;font-weight:700;color:#C9973A;letter-spacing:1px;margin-bottom:6px;">🔔 UPCOMING APPOINTMENTS</div>';
+    due.forEach(function(p){
+      var d=new Date(p.nextAppointment);
+      var today=new Date();
+      var diff=Math.round((d-today)/(1000*60*60*24));
+      var label=diff===0?'<span style="color:#4ADE80;font-weight:700;">TODAY</span>':diff===1?'Tomorrow':'In '+diff+' days';
+      h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.06);">'
+        +'<span style="font-size:11px;color:#E8C070;">'+p.name+'</span>'
+        +'<span style="font-size:10px;color:rgba(255,255,255,.7);">'+label+'</span>'
+        +'<button onclick="openPatientView(\'' + p.id + '\')" style="background:#C9973A;border:none;border-radius:6px;color:#1A3A2A;font-size:9px;font-weight:700;padding:3px 8px;cursor:pointer;font-family:inherit;">View</button>'
+      +'</div>';
+    });
+    h+='</div>';
+  }
+
+  // Action button
+  h+='<button onclick="openAddPatient()" style="width:100%;padding:13px;background:#C9973A;border:none;border-radius:11px;color:#1A3A2A;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:14px;display:flex;align-items:center;justify-content:center;gap:8px;">➕ Add New Patient</button>';
+
+  // Patient list
+  if(patients.length>0){
+    h+='<div style="font-size:10px;font-weight:700;color:#C9973A;letter-spacing:1px;margin-bottom:8px;">PATIENT RECORDS</div>';
+    patients.forEach(function(p){
+      var prakritiColor=p.prakriti==='vata'?'#4A90B8':p.prakriti==='pitta'?'#C85A28':'#2E7D32';
+      var prakritiLabel=p.prakriti?p.prakriti.charAt(0).toUpperCase()+p.prakriti.slice(1):'Unknown';
+      var lastVisitStr=p.lastVisit?new Date(p.lastVisit).toLocaleDateString('en-IN'):'No visits yet';
+      var hasAppt=p.nextAppointment;
+      var apptStr=hasAppt?'Next: '+new Date(p.nextAppointment).toLocaleDateString('en-IN'):'';
+      
+      // Overdue check
+      var isOverdue=false;
+      if(hasAppt){
+        var diff=Math.round((new Date(p.nextAppointment)-new Date())/(1000*60*60*24));
+        if(diff<0) isOverdue=true;
+      }
+
+      h+='<div style="background:#1A3A2A;border:1px solid rgba(201,151,58,.3);border-radius:12px;padding:12px 14px;margin-bottom:8px;cursor:pointer;transition:.15s;" onclick="openPatientView(\'' + p.id + '\')">'
+        +'<div style="display:flex;align-items:center;gap:11px;">'
+          +'<div style="width:42px;height:42px;background:'+prakritiColor+'22;border:2px solid '+prakritiColor+'55;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;">'+(p.prakriti&&PD[p.prakriti]?PD[p.prakriti].emoji:'👤')+'</div>'
+          +'<div style="flex:1;min-width:0;">'
+            +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;">'
+              +'<span style="font-size:13px;font-weight:700;color:#E8C070;">'+p.name+'</span>'
+              +'<span style="font-size:9px;background:'+prakritiColor+'33;color:'+prakritiColor+';border-radius:20px;padding:1px 7px;font-weight:700;">'+prakritiLabel+'</span>'
+              +(isOverdue?'<span style="font-size:9px;background:rgba(255,80,50,.2);color:#FF6B6B;border-radius:20px;padding:1px 7px;font-weight:700;">⚠ Overdue</span>':'')
+            +'</div>'
+            +'<div style="font-size:11px;color:rgba(255,255,255,.75);margin-bottom:2px;">'+p.age+' yrs · '+(p.gender||'')+(p.complaint?' · '+p.complaint:'')+'</div>'
+            +'<div style="font-size:10px;color:rgba(255,255,255,.5);">Last visit: '+lastVisitStr+(apptStr?' · <span style="color:#C9973A;">'+apptStr+'</span>':'')+'</div>'
+          +'</div>'
+          +'<span style="color:#C9973A;font-size:18px;">›</span>'
+        +'</div>'
+      +'</div>';
+    });
+  } else {
+    h+='<div style="text-align:center;padding:32px 16px;color:rgba(255,255,255,.5);">'
+      +'<div style="font-size:40px;margin-bottom:10px;">📋</div>'
+      +'<div style="font-size:13px;font-weight:600;color:rgba(255,255,255,.7);margin-bottom:4px;">No patients yet</div>'
+      +'<div style="font-size:11px;">Tap "Add New Patient" to begin</div>'
+    +'</div>';
+  }
+
+  // Quick action: hospitals
+  h+='<div style="margin-top:14px;">'
+    +'<button onclick="showTab(\'doctor\')" style="width:100%;padding:11px;background:rgba(74,158,122,.2);border:1.5px solid rgba(74,158,122,.5);border-radius:11px;color:#7AC4A0;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">🏥 Find Nearby Ayurvedic Hospitals</button>'
+  +'</div>';
+
+  h+='</div>';
+  hc.innerHTML=h;
+  setTimeout(checkDoctorNotifications, 300);
+}
+
+function renderAddPatientForm(){
+  const hc=document.getElementById('tab-home');
+  hc.innerHTML='<div class="fade-in">'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">'
+      +'<button onclick="openPatientList()" style="background:rgba(201,151,58,.15);border:1px solid rgba(201,151,58,.4);border-radius:8px;color:#E8C070;font-size:13px;padding:6px 12px;cursor:pointer;font-family:inherit;">← Back</button>'
+      +'<div style="font-size:14px;font-weight:700;color:#E8C070;">Add New Patient</div>'
+    +'</div>'
+    // Patient form per AH Sutrasthana 1.25 Dashvidha Pariksha fields
+    +'<div style="background:#1A3A2A;border:1px solid rgba(201,151,58,.25);border-radius:12px;padding:14px;margin-bottom:12px;">'
+      +'<div style="font-size:9px;font-weight:700;color:#C9973A;letter-spacing:1.2px;margin-bottom:10px;">PATIENT DETAILS · AH Sutrasthana 1.25</div>'
+      +_field("patient-name","Full Name","text","e.g. Priya Kulkarni","Name*")
+      +_field("patient-age","Age","number","e.g. 34","Age*")
+      +'<div style="margin-bottom:10px;">'
+        +'<div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.6);margin-bottom:4px;">Gender*</div>'
+        +'<div style="display:flex;gap:6px;">'
+          +['Male','Female','Other'].map(function(g){
+            return '<button type="button" id="pgender-'+g+'" onclick="selectGender(this.dataset.g)" data-g="'+g+'" style="flex:1;padding:8px;border:1.5px solid rgba(255,255,255,.2);border-radius:8px;background:transparent;color:rgba(255,255,255,.7);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:.15s;">'+g+'</button>';
+          }).join('')
+        +'</div>'
+      +'</div>'
+      +_field("patient-complaint","Chief Complaint / Vikara","text","e.g. Acidity, joint pain, insomnia","Chief Complaint*")
+      +_field("patient-phone","Phone Number","tel","e.g. 9876543210","Phone")
+      +_field("patient-appt","Next Appointment Date","date","","First Appointment")
+    +'</div>'
+    +'<div style="background:#1A3A2A;border:1px solid rgba(201,151,58,.25);border-radius:12px;padding:14px;margin-bottom:12px;">'
+      +'<div style="font-size:9px;font-weight:700;color:#C9973A;letter-spacing:1.2px;margin-bottom:10px;">PRAKRITI & CLINICAL NOTES</div>'
+      +'<div style="margin-bottom:10px;">'
+        +'<div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.6);margin-bottom:4px;">Prakriti Assessment (CS Vimanasthana 8)</div>'
+        +'<div style="display:flex;gap:6px;">'
+          +['vata','pitta','kapha'].map(function(d){
+            var c=d==='vata'?'#4A90B8':d==='pitta'?'#C85A28':'#2E7D32';
+            var lbl=d.charAt(0).toUpperCase()+d.slice(1);
+            return '<button type="button" id="pprakriti-'+d+'" onclick="selectPrakriti(this.dataset.d)" data-d="'+d+'" style="flex:1;padding:8px;border:1.5px solid '+c+'44;border-radius:8px;background:transparent;color:'+c+';font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;transition:.15s;">'+(PD[d]?PD[d].emoji:'')+' '+lbl+'</button>';
+          }).join('')
+        +'</div>'
+      +'</div>'
+      +'<div style="margin-bottom:10px;">'
+        +'<div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.6);margin-bottom:4px;">Clinical Notes (initial assessment)</div>'
+        +'<textarea id="patient-notes" style="width:100%;padding:10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:rgba(255,255,255,.9);font-size:11px;line-height:1.5;font-family:inherit;resize:vertical;min-height:70px;box-sizing:border-box;" placeholder="Nadi, Agni, Ama status, treatment plan..."></textarea>'
+      +'</div>'
+    +'</div>'
+    +'<button type="button" onclick="saveNewPatient();" style="width:100%;padding:14px;background:#C9973A;border:none;border-radius:11px;color:#1A3A2A;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">Save Patient Record</button>'
+  +'</div>';
+}
+
+function _field(id,placeholder,type,ph,label){
+  return '<div style="margin-bottom:10px;">'
+    +'<div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.6);margin-bottom:4px;">'+label+'</div>'
+    +'<input type="'+type+'" id="'+id+'" placeholder="'+ph+'" style="width:100%;padding:10px 12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:rgba(255,255,255,.9);font-size:12px;font-family:inherit;box-sizing:border-box;" />'
+  +'</div>';
+}
+
+var _newPatientGender='',_newPatientPrakriti='';
+function selectGender(g){
+  _newPatientGender=g;
+  ['Male','Female','Other'].forEach(function(x){
+    var btn=document.getElementById('pgender-'+x);
+    if(btn){
+      btn.style.background=x===g?'rgba(201,151,58,.3)':'transparent';
+      btn.style.borderColor=x===g?'#C9973A':'rgba(255,255,255,.2)';
+      btn.style.color=x===g?'#E8C070':'rgba(255,255,255,.7)';
+    }
+  });
+}
+function selectPrakriti(d){
+  _newPatientPrakriti=d;
+  ['vata','pitta','kapha'].forEach(function(x){
+    var c=x==='vata'?'#4A90B8':x==='pitta'?'#C85A28':'#2E7D32';
+    var btn=document.getElementById('pprakriti-'+x);
+    if(btn){
+      btn.style.background=x===d?c+'33':'transparent';
+      btn.style.borderColor=x===d?c:c+'44';
+    }
+  });
+}
+
+function saveNewPatient(){
+  var name=(document.getElementById('patient-name')||{}).value||'';
+  var age=(document.getElementById('patient-age')||{}).value||'';
+  var complaint=(document.getElementById('patient-complaint')||{}).value||'';
+  var phone=(document.getElementById('patient-phone')||{}).value||'';
+  var appt=(document.getElementById('patient-appt')||{}).value||'';
+  var notes=(document.getElementById('patient-notes')||{}).value||'';
+  if(!name.trim()||!age){alert('Name and age are required.');return;}
+  
+  var p=_patientStore.add({
+    name:name.trim(),age:parseInt(age),gender:_newPatientGender,
+    prakriti:_newPatientPrakriti,complaint:complaint.trim(),
+    phone:phone.trim(),
+    nextAppointment:appt?new Date(appt).toISOString():'',
+    notes:notes.trim()
+  });
+  _newPatientGender=''; _newPatientPrakriti='';
+  _doctorState.activeView='patientDetail';
+  _doctorState.activePatientId=p.id;
+  renderDoctorHome();
+}
+
+function renderPatientDetail(id){
+  var p=_patientStore.getById(id);
+  if(!p){_doctorState.activeView='list';renderDoctorHome();return;}
+  const hc=document.getElementById('tab-home');
+  var pc=p.prakriti==='vata'?'#4A90B8':p.prakriti==='pitta'?'#C85A28':'#2E7D32';
+  var pLabel=p.prakriti?p.prakriti.charAt(0).toUpperCase()+p.prakriti.slice(1):'Not assessed';
+  
+  var hasAppt=p.nextAppointment;
+  var apptStr='', apptOverdue=false;
+  if(hasAppt){
+    var diff=Math.round((new Date(p.nextAppointment)-new Date())/(1000*60*60*24));
+    apptOverdue=diff<0;
+    apptStr=apptOverdue?'⚠ Overdue ('+Math.abs(diff)+'d ago)':diff===0?'Today':diff===1?'Tomorrow':'In '+diff+' days';
+  }
+
+  var h='<div class="fade-in">';
+  h+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">'
+    +'<button onclick="openPatientList()" style="background:rgba(201,151,58,.15);border:1px solid rgba(201,151,58,.4);border-radius:8px;color:#E8C070;font-size:13px;padding:6px 12px;cursor:pointer;font-family:inherit;">← Back</button>'
+    +'<div style="flex:1;font-size:14px;font-weight:700;color:#E8C070;">Patient Record</div>'
+    +'<button onclick="deletePatientById(this.dataset.id,this.dataset.name)" data-id="'+id+'" data-name="'+p.name+'" style="background:rgba(255,80,50,.15);border:1px solid rgba(255,80,50,.4);border-radius:8px;color:#FF6B6B;font-size:11px;padding:6px 10px;cursor:pointer;font-family:inherit;">🗑 Delete</button>'
+  +'</div>';
+
+  // Patient header
+  h+='<div style="background:linear-gradient(135deg,#1A3A2A,#0F2018);border:1.5px solid '+pc+'44;border-radius:14px;padding:16px;margin-bottom:12px;">'
+    +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">'
+      +'<div style="width:52px;height:52px;background:'+pc+'22;border:2px solid '+pc+';border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:26px;">'+(p.prakriti&&PD[p.prakriti]?PD[p.prakriti].emoji:'👤')+'</div>'
+      +'<div>'
+        +'<div style="font-size:17px;font-weight:700;color:#E8C070;">'+p.name+'</div>'
+        +'<div style="font-size:11px;color:rgba(255,255,255,.7);">'+p.age+' yrs'+( p.gender?' · '+p.gender:'')+'</div>'
+        +'<div style="font-size:9px;background:'+pc+'33;color:'+pc+';border-radius:20px;padding:2px 9px;font-weight:700;display:inline-block;margin-top:3px;">'+pLabel+' Prakriti</div>'
+      +'</div>'
+    +'</div>'
+    +(p.complaint?'<div style="font-size:11px;color:rgba(255,255,255,.8);margin-bottom:4px;"><strong style="color:#C9973A;">Chief Complaint:</strong> '+p.complaint+'</div>':'')
+    +(p.phone?'<div style="font-size:11px;color:rgba(255,255,255,.7);">📞 '+p.phone+'</div>':'')
+  +'</div>';
+
+  // Appointment section
+  h+='<div style="background:#1A3A2A;border:1px solid rgba(201,151,58,.25);border-radius:12px;padding:13px;margin-bottom:12px;">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+      +'<div style="font-size:10px;font-weight:700;color:#C9973A;letter-spacing:1px;">NEXT APPOINTMENT</div>'
+    +'</div>'
+    +(hasAppt
+      ?'<div style="font-size:13px;font-weight:700;color:'+(apptOverdue?'#FF6B6B':'#4ADE80')+';">'+new Date(p.nextAppointment).toLocaleDateString('en-IN',{weekday:'long',year:'numeric',month:'long',day:'numeric'})+'</div>'
+       +'<div style="font-size:11px;color:rgba(255,255,255,.6);margin-top:2px;">'+apptStr+'</div>'
+      :'<div style="font-size:11px;color:rgba(255,255,255,.5);font-style:italic;">No appointment scheduled</div>')
+    +'<div style="margin-top:10px;">'
+      +'<div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.5);margin-bottom:5px;">Update Appointment Date</div>'
+      +'<div style="display:flex;gap:8px;">'
+        +'<input type="date" id="appt-date-input" style="flex:1;padding:8px 10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:rgba(255,255,255,.9);font-size:12px;font-family:inherit;" />'
+        +'<button onclick="updateAppt(this.dataset.id)" data-id="'+id+'" style="padding:8px 14px;background:#C9973A;border:none;border-radius:8px;color:#1A3A2A;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;">Set</button>'
+      +'</div>'
+    +'</div>'
+  +'</div>';
+
+  // Add Visit button
+  h+='<button onclick="openAddVisit(\'' + id + '\')" style="width:100%;padding:12px;background:rgba(74,158,122,.2);border:1.5px solid rgba(74,158,122,.5);border-radius:11px;color:#7AC4A0;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:12px;">➕ Record New Visit / Consultation</button>';
+
+  // Visit history
+  var visits=p.history||[];
+  if(visits.length>0){
+    h+='<div style="font-size:10px;font-weight:700;color:#C9973A;letter-spacing:1px;margin-bottom:8px;">TREATMENT HISTORY ('+visits.length+' visits)</div>';
+    visits.forEach(function(v,i){
+      h+='<div style="background:#1A3A2A;border:1px solid rgba(201,151,58,.2);border-radius:10px;padding:11px 13px;margin-bottom:6px;">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">'
+          +'<div style="font-size:12px;font-weight:700;color:#E8C070;">Visit '+(visits.length-i)+'</div>'
+          +'<div style="font-size:10px;color:rgba(255,255,255,.5);">'+new Date(v.date).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+'</div>'
+        +'</div>'
+        +(v.complaint?'<div style="font-size:11px;color:rgba(255,255,255,.8);margin-bottom:3px;"><strong style="color:rgba(201,151,58,.8);">Complaint:</strong> '+v.complaint+'</div>':'')
+        +(v.treatment?'<div style="font-size:11px;color:rgba(255,255,255,.8);margin-bottom:3px;"><strong style="color:rgba(201,151,58,.8);">Treatment:</strong> '+v.treatment+'</div>':'')
+        +(v.herbs?'<div style="font-size:11px;color:rgba(255,255,255,.8);margin-bottom:3px;"><strong style="color:rgba(74,158,122,.9);">Herbs/Medications:</strong> '+v.herbs+'</div>':'')
+        +(v.notes?'<div style="font-size:10px;color:rgba(255,255,255,.6);margin-top:4px;font-style:italic;">'+v.notes+'</div>':'')
+      +'</div>';
+    });
+  } else {
+    h+='<div style="text-align:center;padding:16px;color:rgba(255,255,255,.4);font-size:11px;">No visits recorded yet</div>';
+  }
+
+  h+='</div>';
+  hc.innerHTML=h;
+}
+
+function updateAppt(id){
+  var d=(document.getElementById('appt-date-input')||{}).value;
+  if(!d){alert('Please select a date.');return;}
+  _patientStore.update(id,{nextAppointment:new Date(d).toISOString()});
+  renderPatientDetail(id);
+}
+
+function renderAddVisitForm(id){
+  var p=_patientStore.getById(id);
+  if(!p) return;
+  const hc=document.getElementById('tab-home');
+  hc.innerHTML='<div class="fade-in">'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">'
+      +'<button onclick="openPatientView(_doctorState.activePatientId)" style="background:rgba(201,151,58,.15);border:1px solid rgba(201,151,58,.4);border-radius:8px;color:#E8C070;font-size:13px;padding:6px 12px;cursor:pointer;font-family:inherit;">← Back</button>'
+      +'<div style="font-size:14px;font-weight:700;color:#E8C070;">Record Visit — '+p.name+'</div>'
+    +'</div>'
+    +'<div style="background:#1A3A2A;border:1px solid rgba(201,151,58,.25);border-radius:12px;padding:14px;margin-bottom:12px;">'
+      +'<div style="font-size:9px;font-weight:700;color:#C9973A;letter-spacing:1.2px;margin-bottom:10px;">CONSULTATION RECORD · CS Vimanasthana 4 (Rogi Pariksha)</div>'
+      +_field("visit-complaint","Presenting complaint","text","e.g. Acidity worsened after travel","Presenting Complaint")
+      +'<div style="margin-bottom:10px;">'
+        +'<div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.6);margin-bottom:4px;">Treatment Given (Chikitsa)</div>'
+        +'<textarea id="visit-treatment" style="width:100%;padding:10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:rgba(255,255,255,.9);font-size:11px;font-family:inherit;resize:vertical;min-height:60px;box-sizing:border-box;" placeholder="Panchakarma, Nasyam, Basti, Shirodhara..."></textarea>'
+      +'</div>'
+      +'<div style="margin-bottom:10px;">'
+        +'<div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.6);margin-bottom:4px;">Herbs / Medications Prescribed (API-based)</div>'
+        +'<textarea id="visit-herbs" style="width:100%;padding:10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:rgba(255,255,255,.9);font-size:11px;font-family:inherit;resize:vertical;min-height:55px;box-sizing:border-box;" placeholder="Triphala 2g, Ashwagandha 500mg, Yashtimadhu..."></textarea>'
+      +'</div>'
+      +'<div style="margin-bottom:10px;">'
+        +'<div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.6);margin-bottom:4px;">Follow-up Date</div>'
+        +'<input type="date" id="visit-followup" style="width:100%;padding:10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:rgba(255,255,255,.9);font-size:12px;font-family:inherit;box-sizing:border-box;" />'
+      +'</div>'
+      +'<div style="margin-bottom:4px;">'
+        +'<div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.6);margin-bottom:4px;">Vaidya Notes / Observations</div>'
+        +'<textarea id="visit-notes" style="width:100%;padding:10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:rgba(255,255,255,.9);font-size:11px;font-family:inherit;resize:vertical;min-height:55px;box-sizing:border-box;" placeholder="Nadi observation, Agni status, improvement noted..."></textarea>'
+      +'</div>'
+    +'</div>'
+    +'<button type="button" onclick="saveVisit(this.dataset.id)" data-id="'+id+'" style="width:100%;padding:14px;background:#C9973A;border:none;border-radius:11px;color:#1A3A2A;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">Save Consultation Record</button>'
+  +'</div>';
+}
+
+function saveVisit(id){
+  var complaint=(document.getElementById('visit-complaint')||{}).value||'';
+  var treatment=(document.getElementById('visit-treatment')||{}).value||'';
+  var herbs=(document.getElementById('visit-herbs')||{}).value||'';
+  var followup=(document.getElementById('visit-followup')||{}).value||'';
+  var notes=(document.getElementById('visit-notes')||{}).value||'';
+  
+  _patientStore.addVisit(id,{complaint,treatment,herbs,notes});
+  if(followup){
+    _patientStore.update(id,{nextAppointment:new Date(followup).toISOString()});
+  }
+  _doctorState.activeView='patientDetail';
+  renderDoctorHome();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -3577,7 +4009,16 @@ function renderDoctors(){
     if(DS.userLat&&d.lat&&d.lng) dist=haversine(DS.userLat,DS.userLng,d.lat,d.lng);
     return Object.assign({},d,{dist:dist});
   });
-  if(DS.userLat&&DS.radius!==99999) docs=docs.filter(function(d){return d.dist===null||d.dist<=DS.radius;});
+  // Strict radius filter: only show doctors with known coordinates within radius
+  // Doctors without coordinates (dist===null) only shown in "All India" mode
+  if(DS.userLat){
+    if(DS.radius===99999){
+      // All India: show everything (sort by distance, nulls last)
+    } else {
+      // Radius filter: exclude doctors with null dist OR dist > radius
+      docs=docs.filter(function(d){ return d.dist!==null && d.dist<=DS.radius; });
+    }
+  }
   docs.sort(function(a,b){
     if(a.dist===null&&b.dist===null) return 0;
     if(a.dist===null) return 1;
@@ -3616,7 +4057,7 @@ function renderDoctors(){
 
   h+='</div>'
     +'<div style="display:flex;gap:6px;flex-wrap:wrap;">';
-  [{l:'15 km',v:15},{l:'50 km',v:50},{l:'150 km',v:150},{l:'500 km',v:500},{l:'All India',v:99999}].forEach(function(rb){
+  [{l:'15 km',v:15},{l:'50 km',v:50},{l:'100 km',v:100},{l:'250 km',v:250},{l:'All India',v:99999}].forEach(function(rb){
     var active=DS.radius===rb.v;
     h+='<button onclick="setDocRadius('+rb.v+');" style="padding:5px 12px;border-radius:20px;border:1.5px solid '+(active?'#C9973A':'rgba(255,255,255,.3)')+';background:'+(active?'rgba(201,151,58,.2)':'transparent')+';color:'+(active?'#E8C070':'rgba(255,255,255,.75)')+';font-size:10px;font-weight:700;cursor:pointer;font-family:inherit;">'+rb.l+'</button>';
   });
@@ -3678,10 +4119,15 @@ function detectDocLocation(){
   const el=document.getElementById('doc-content');
   if(!el) return;
   if(!navigator.geolocation){alert('Geolocation not supported. Please use Chrome or Safari.');return;}
-  el.innerHTML='<div style="text-align:center;padding:32px 16px;color:rgba(255,255,255,.7);">'
-    +'<div style="font-size:32px;margin-bottom:10px;">📍</div>'
-    +'<div style="font-size:13px;font-weight:700;color:#E8C070;margin-bottom:6px;">Detecting your location...</div>'
-    +'<div style="font-size:11px;">Please allow location access when prompted</div>'
+  el.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;padding:28px 20px;">'
+    +'<div style="width:64px;height:64px;background:rgba(201,151,58,.15);border:2px solid rgba(201,151,58,.5);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:14px;">📍</div>'
+    +'<div style="font-size:14px;font-weight:700;color:#E8C070;margin-bottom:8px;">Allow Location Access</div>'
+    +'<div style="font-size:11.5px;color:rgba(255,255,255,.75);text-align:center;line-height:1.65;margin-bottom:16px;max-width:260px;">A browser popup will appear asking for location permission. Tap <strong style="color:#C9973A;">Allow</strong> to show Ayurvedic hospitals nearest to you.</div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;">'
+      +'<div style="background:rgba(201,151,58,.12);border:1px solid rgba(201,151,58,.3);border-radius:8px;padding:7px 12px;font-size:10px;color:#C9973A;">🔒 Location not stored</div>'
+      +'<div style="background:rgba(201,151,58,.12);border:1px solid rgba(201,151,58,.3);border-radius:8px;padding:7px 12px;font-size:10px;color:#C9973A;">✓ Used only to find nearby doctors</div>'
+    +'</div>'
+    +'<div style="margin-top:14px;width:40px;height:40px;border:3px solid rgba(201,151,58,.2);border-top-color:#C9973A;border-radius:50%;animation:spin 1s linear infinite;"></div>'
     +'</div>';
   navigator.geolocation.getCurrentPosition(
     function(pos){
