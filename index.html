@@ -1,44 +1,4 @@
-<!D,
-  kaunch:{name:'Kaunch Beej (Mucuna pruriens)',latin:'Mucuna pruriens',
-    vata:{safe:true,dose:'3-5g powder warm milk',notes:'Primary Vataj herb. Dopamine precursor. Neuroprotective.'},
-    pitta:{safe:true,dose:'3g cool milk',notes:'Neutral. Use with Shatavari to balance heating quality.'},
-    kapha:{safe:true,dose:'5g honey',notes:'Reduces Meda. Good for Kapha with joint stiffness.'},
-    ref:'Dravyaguna Vijnana; CS Chikitsa 25.85; CCRAS'},
-  tulsi:{name:'Tulsi / Holy Basil (Ocimum tenuiflorum)',latin:'Ocimum tenuiflorum',
-    vata:{safe:true,dose:'3-5 leaves or 2g powder warm water',notes:'Good for Vata respiratory. Warming quality suits Vata. Use with ginger+honey.'},
-    pitta:{safe:'caution',dose:'2-3 leaves only',notes:'MILD CAUTION: Heating. Small amounts only. Use cool carrier.'},
-    kapha:{safe:true,dose:'5-7 leaves or 3g warm water',notes:'BEST for Kapha respiratory. Primary Pranavaha Srotas herb. With ginger+pepper.'},
-    ref:'Dravyaguna Vijnana; CS Chikitsa 18 (Kasa); CCRAS monograph'},
-  manjistha:{name:'Manjistha (Rubia cordifolia)',latin:'Rubia cordifolia',
-    vata:{safe:true,dose:'3g warm water',notes:'Balances Vyan Vata (circulation). Blood purifier.'},
-    pitta:{safe:true,dose:'3-5g cool water',notes:'BEST for Pitta — primary Rakta Shodhaka (blood purifier). Reduces skin Pitta.'},
-    kapha:{safe:true,dose:'3g honey',notes:'Reduces Kapha in lymph. Anti-Ama herb.'},
-    ref:'Dravyaguna Vijnana; CS Sutrasthana 25; AH Chikitsa 19'},
-  arjuna:{name:'Arjuna (Terminalia arjuna)',latin:'Terminalia arjuna',
-    vata:{safe:true,dose:'3g warm milk',notes:'Reduces Vyan Vata cardiac irregularities. Milk Anupana essential.'},
-    pitta:{safe:true,dose:'3-5g cool milk',notes:'BEST for Pitta heart — primary Hridaya herb. Reduces inflammatory cardiac Pitta.'},
-    kapha:{safe:true,dose:'5g warm water',notes:'Reduces Kapha in Rasa dhatu. Lowers cholesterol. Combine with Guggulu.'},
-    ref:'CS Sutrasthana 25 (Hridya group); AH Chikitsa 1'},
-  giloy:{name:'Giloy / Guduchi (Tinospora cordifolia)',latin:'Tinospora cordifolia',
-    vata:{safe:true,dose:'3g powder or 30ml juice+ghee',notes:'BEST Vyadhikshamatva (immunity) herb. Primary Rasayana for Vata.'},
-    pitta:{safe:true,dose:'30ml juice cool water',notes:'BEST for Pitta fever + inflammation. Reduces chronic Pitta.'},
-    kapha:{safe:true,dose:'3g powder honey+pepper',notes:'Good for Kapha immunity. Add pepper. Excellent in Varsha season.'},
-    ref:'CS Sutrasthana 25 (Vayasthapana); Dravyaguna Vijnana; CCRAS'},
-  bhumyamalaki:{name:'Bhumyamalaki (Phyllanthus niruri)',latin:'Phyllanthus niruri',
-    vata:{safe:true,dose:'3g warm water',notes:'Liver support. Mild laxative for Vata constipation.'},
-    pitta:{safe:true,dose:'3-5g cool water',notes:'BEST — primary hepatoprotective herb. Reduces Ranjaka Pitta in liver.'},
-    kapha:{safe:true,dose:'3g honey',notes:'Diuretic reduces water retention. Useful in Kapha diabetes.'},
-    ref:'Dravyaguna Vijnana; CCRAS'},
-  vidanga:{name:'Vidanga (Embelia ribes)',latin:'Embelia ribes',
-    vata:{safe:true,dose:'2g warm water',notes:'Removes intestinal Ama. Digestive for Vata. Use with Hingvastak.'},
-    pitta:{safe:true,dose:'2g cool water',notes:'Safe. Anti-parasitic. Does not increase heat significantly.'},
-    kapha:{safe:true,dose:'3g honey',notes:'BEST — primary Kapha-Ama remover from intestines. With Trikatu.'},
-    ref:'Dravyaguna Vijnana; CS Sutrasthana 4; CCRAS'},
-  triphala_ghrita:{name:'Triphala Ghrita (Medicated Ghee)',latin:'Compound Ayurvedic preparation',
-    vata:{safe:true,dose:'1 tsp warm milk morning',notes:'Lubricates intestines, eyes, joints. Best anti-aging Rasayana for Vata.'},
-    pitta:{safe:true,dose:'1 tsp cool milk',notes:'BEST Pitta Rasayana — Triphala cools, ghee nourishes. Classic formula.'},
-    kapha:{safe:'caution',dose:'Half tsp only',notes:'CAUTION: Heavy for Kapha. Grishma season only. Add Trikatu.'},
-    ref:'CS Chikitsa 1 (Rasayana); AH Uttarasthana 39; Ashtanga Hridayam'}OCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -1096,11 +1056,58 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--text);
 .skel-line.full { width: 100%; }
 .skel-card { height: 80px; width: 100%; margin-bottom: 8px; }
 .skel-circle { width: 48px; height: 48px; border-radius: 50%; flex-shrink: 0; }
+
+/* ─── Toast Notification (replaces alert() for WebView/TWA compat) ─── */
+#ayur-toast{
+  position:fixed;bottom:100px;left:50%;transform:translateX(-50%) translateY(20px);
+  z-index:999998;
+  background:#1A3A2A;border:1px solid rgba(201,151,58,.5);
+  color:#E8C070;border-radius:12px;padding:11px 18px;
+  font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif;
+  max-width:88%;text-align:center;line-height:1.5;
+  box-shadow:0 4px 20px rgba(0,0,0,.4);
+  opacity:0;transition:opacity .3s ease,transform .3s ease;
+  pointer-events:none;
+}
+#ayur-toast.show{
+  opacity:1;transform:translateX(-50%) translateY(0);
+}
+#ayur-toast.error{ background:#3A1A1A;border-color:rgba(255,80,50,.5);color:#FF6B6B; }
+#ayur-toast.success{ background:#1A3A2A;border-color:rgba(74,222,128,.5);color:#4ADE80; }
+
+/* Custom Confirm Modal */
+#ayur-confirm-modal{position:fixed;inset:0;z-index:999999;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;padding:20px;}
+#ayur-confirm-modal.open{display:flex;}
+#ayur-confirm-box{background:var(--white,#fff);border-radius:16px;padding:24px 20px;max-width:320px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.45);}
+.acm-title{font-size:16px;font-weight:700;color:#1A3A2A;margin-bottom:8px;}
+.acm-msg{font-size:13px;color:#666;line-height:1.6;margin-bottom:20px;}
+.acm-btns{display:flex;gap:10px;}
+.acm-cancel{flex:1;padding:11px;border:1.5px solid #ddd;border-radius:10px;background:transparent;font-size:13px;font-weight:600;color:#888;cursor:pointer;font-family:inherit;}
+.acm-ok{flex:1;padding:11px;border:none;border-radius:10px;background:#E53935;font-size:13px;font-weight:700;color:#fff;cursor:pointer;font-family:inherit;}
+.acm-ok.gold{background:#C9973A;}
 </style>
+  <meta name="theme-color" content="#0B2318">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AyurMind AI">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="description" content="AyurMind AI — Personalized Ayurvedic health analysis based on Charaka Samhita. Prakriti assessment, herb guidance, dosha analysis.">
 </head>
 <body>
 
 <!-- WELCOME SCREEN -->
+<div id="ayur-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="acm-title-el">
+  <div id="ayur-confirm-box">
+    <div id="acm-title-el" class="acm-title">Confirm</div>
+    <div id="acm-msg-el" class="acm-msg"></div>
+    <div class="acm-btns">
+      <button class="acm-cancel" onclick="ayurConfirmCancel()">Cancel</button>
+      <button id="acm-ok-btn" class="acm-ok" onclick="ayurConfirmOK()">Confirm</button>
+    </div>
+  </div>
+</div>
+<div id="ayur-toast"></div>
+
 <div id="s-welcome" class="screen active">
 
   <!-- Sacred geometry rings (CSS animated) -->
@@ -1424,9 +1431,46 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--text);
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
+
+// ── Custom Confirm Dialog (confirm() is blocked in Android TWA/WebView)
+var _acmCB=null;
+function ayurConfirm(title,msg,okLabel,cb,isDanger){
+  var el=document.getElementById('ayur-confirm-modal');
+  var t=document.getElementById('acm-title-el');
+  var m=document.getElementById('acm-msg-el');
+  var ok=document.getElementById('acm-ok-btn');
+  if(!el) return;
+  if(t) t.textContent=title||'Confirm';
+  if(m) m.textContent=msg||'Are you sure?';
+  if(ok){ok.textContent=okLabel||'Confirm';ok.className=isDanger?'acm-ok':'acm-ok gold';}
+  _acmCB=cb;
+  el.classList.add('open');
+}
+function ayurConfirmOK(){
+  var el=document.getElementById('ayur-confirm-modal');
+  if(el) el.classList.remove('open');
+  if(_acmCB){_acmCB();_acmCB=null;}
+}
+function ayurConfirmCancel(){
+  var el=document.getElementById('ayur-confirm-modal');
+  if(el) el.classList.remove('open');
+  _acmCB=null;
+}
+// ── Toast Notification (replaces alert() for WebView compat)
+var _toastT=null;
+function showToast(msg,type,dur){
+  var el=document.getElementById('ayur-toast');
+  if(!el) return;
+  if(_toastT) clearTimeout(_toastT);
+  el.textContent=msg;
+  el.className=type==='error'?'error':type==='success'?'success':'';
+  el.classList.add('show');
+  _toastT=setTimeout(function(){el.classList.remove('show');},dur||3000);
+}
+
 // ══════════════════════════════════════════════════════════════════
 // LANGUAGE SYSTEM — EN, HI, MR, KN, TA, TE
 // ══════════════════════════════════════════════════════════════════
@@ -2323,11 +2367,17 @@ function openAddVisit(id){ _doctorState.activeView='addVisit'; _doctorState.acti
 function openAddPatient(){ _doctorState.activeView='addPatient'; renderDoctorHome(); }
 function openPatientList(){ _doctorState.activeView='list'; renderDoctorHome(); }
 function deletePatientById(id,name){
-  if(confirm('Delete patient '+name+'?')){
-    _patientStore.remove(id);
-    _doctorState.activeView='list';
-    renderDoctorHome();
-  }
+  ayurConfirm(
+    'Delete Patient',
+    'Delete '+name+'? This cannot be undone.',
+    'Delete',
+    function(){
+      _patientStore.remove(id);
+      _doctorState.activeView='list';
+      renderDoctorHome();
+    },
+    true
+  );
 }
 
 function sendPatientNotification(patientName, message){
@@ -2351,7 +2401,7 @@ function notifyPatientAppointment(id){
   var apptStr=p.nextAppointment?new Date(p.nextAppointment).toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'}):'';
   var msg=apptStr?'Your appointment is scheduled for '+apptStr+' at the clinic.':'Please contact the clinic for your appointment details.';
   sendPatientNotification(p.name, msg);
-  alert('Notification sent for: '+p.name+'\n'+msg+'\n\n(Browser notification sent if permission granted)');
+  showToast('Notification sent for '+p.name,'success');
 }
 
 function generatePatientAISummary(id){
@@ -2564,7 +2614,7 @@ function saveNewPatient(){
   var phone=(document.getElementById('patient-phone')||{}).value||'';
   var appt=(document.getElementById('patient-appt')||{}).value||'';
   var notes=(document.getElementById('patient-notes')||{}).value||'';
-  if(!name.trim()||!age){alert('Name and age are required.');return;}
+  if(!name.trim()||!age){showToast('Name and age are required.','error');return;}
   
   var p=_patientStore.add({
     name:name.trim(),age:parseInt(age),gender:_newPatientGender,
@@ -2672,7 +2722,7 @@ function renderPatientDetail(id){
 
 function updateAppt(id){
   var d=(document.getElementById('appt-date-input')||{}).value;
-  if(!d){alert('Please select a date.');return;}
+  if(!d){showToast('Please select a date.','error');return;}
   _patientStore.update(id,{nextAppointment:new Date(d).toISOString()});
   renderPatientDetail(id);
 }
@@ -3041,7 +3091,7 @@ function toggleSym(i){
 function analyseSymptoms(){
   const picked=[...appState.pickedSymptoms];
   const custom=appState.customSymptoms||[];
-  if(picked.length===0&&custom.length===0){ alert('Please select at least one symptom or add a custom symptom.'); return; }
+  if(picked.length===0&&custom.length===0){ showToast('Please select at least one symptom.','error'); return; }
   const cnt={vata:0,pitta:0,kapha:0};
   picked.forEach(i=>{cnt[SYMPTOMS[i].d]++;});
 
@@ -4187,7 +4237,7 @@ function renderDoctors(){
 function detectDocLocation(){
   const el=document.getElementById('doc-content');
   if(!el) return;
-  if(!navigator.geolocation){alert('Geolocation not supported. Please use Chrome or Safari.');return;}
+  if(!navigator.geolocation){showToast('Location not available on this browser.','error');return;}
   el.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;padding:28px 20px;">'
     +'<div style="width:64px;height:64px;background:rgba(201,151,58,.15);border:2px solid rgba(201,151,58,.5);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:14px;">📍</div>'
     +'<div style="font-size:14px;font-weight:700;color:#E8C070;margin-bottom:8px;">Allow Location Access</div>'
@@ -4239,7 +4289,7 @@ function detectDocLocation(){
               'Location request timed out. Try again.';
       window._docState=window._docState||{radius:15,userLat:null,userLng:null,located:false,city:''};
       renderDoctors();
-      setTimeout(function(){alert(msg);},100);
+      setTimeout(function(){showToast(msg,'error');},100);
     },
     {timeout:12000,enableHighAccuracy:true,maximumAge:60000}
   );
@@ -4538,7 +4588,7 @@ function drawProgressChart(history){
 
 function exportProgress(){
   const history=loadProgress();
-  if(!history.length){ alert('No data to export.'); return; }
+  if(!history.length){ showToast('No data to export yet.','error'); return; }
   const csv='Date,Dominant,Vata%,Pitta%,Kapha%\n'+history.map(e=>`${e.date},${e.dominant},${e.vata},${e.pitta},${e.kapha}`).join('\n');
   const blob=new Blob([csv],{type:'text/csv'});
   const url=URL.createObjectURL(blob);
@@ -4548,10 +4598,16 @@ function exportProgress(){
 }
 
 function clearProgress(){
-  if(confirm('Clear all progress history? This cannot be undone.')){
-    localStorage.removeItem('ayurmind_v6_progress');
-    renderProgress();
-  }
+  ayurConfirm(
+    'Clear History',
+    'Clear all progress history? This cannot be undone.',
+    'Clear',
+    function(){
+      localStorage.removeItem('ayurmind_v6_progress');
+      renderProgress();
+    },
+    true
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -4573,7 +4629,7 @@ function closePdfModal(){ document.getElementById('pdf-modal').classList.remove(
 function printReport(){
   closePdfModal();
   var r=appState.resultData;
-  if(!r){ alert('Please complete the Prakriti quiz first.'); return; }
+  if(!r){ showToast('Please complete the Prakriti quiz first.','error'); return; }
 
   // Show loading indicator
   var loadingEl=document.createElement('div');
@@ -4593,7 +4649,7 @@ function printReport(){
         generatePdfReport(r);
       } catch(err) {
         var le=document.getElementById('pdf-loading'); if(le) le.remove();
-        alert('PDF generation failed: '+(err.message||'Unknown error')+'. Please try again or screenshot this page.');
+        showToast('PDF generation failed. Please try again.','error',5000);
       }
     } else if(attempts < 20) {
       // Library not loaded yet, retry in 250ms (max 5 seconds wait)
@@ -4601,7 +4657,7 @@ function printReport(){
     } else {
       // Give up after 5 seconds
       var le=document.getElementById('pdf-loading'); if(le) le.remove();
-      alert('PDF library failed to load. Please check your internet connection and try again.');
+      showToast('PDF library not loaded. Check internet connection.','error',5000);
     }
   }
   setTimeout(tryGenerate, 100);
@@ -4609,7 +4665,7 @@ function printReport(){
 
 function generatePdfReport(r){
   if(!window.jspdf||!window.jspdf.jsPDF){
-    alert('PDF generator is still loading. Please try again in a moment.');
+    showToast('PDF generator loading, please wait...','error');
     var le=document.getElementById('pdf-loading'); if(le) le.remove();
     return;
   }
@@ -7514,7 +7570,7 @@ function agniAnswer(id,isYes,yScore,nScore){
 
 function calculateAgniScore(){
   var answered=Object.keys(window._agniAns||{}).length;
-  if(answered<5){alert('Please answer at least 5 questions for an accurate score.');return;}
+  if(answered<5){showToast('Please answer at least 5 questions.','error');return;}
   var score=Math.max(0,Math.min(100,window._agniTotal||0));
   var r=appState.resultData;
   var dom=r?r.dominant:'vata';
@@ -9441,6 +9497,13 @@ const HERB_DRUG_INTERACTIONS = {
     }
   },{passive:true});
 })();
+
+// Stop camera/mic when user switches to another app (PWA/WebView important)
+document.addEventListener('visibilitychange', function(){
+  if(document.hidden){
+    cleanupActiveTools();
+  }
+});
 </script>
 
 <!-- SCROLL TO TOP -->
